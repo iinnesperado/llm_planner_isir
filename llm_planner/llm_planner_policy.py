@@ -71,9 +71,17 @@ class PolicyLLMPlanner(Policy):
     # TODO figure out how to create a cnode with all the parameters and everything
     # TODO how to assign activation value to this polivy
 
-    def create_cnodes_from_plan(self, plan, main_task):
-        created_nodes = []
-        world_model = {"name": to_define, "node_type": "WorldModel"}
+    def create_cnodes_from_plan(self, plan, main_task, wm_name=None):
+        """
+        Creates a cnode for each step of the given plan.
+        
+        :param plan: plan created by the LLM
+        :type plan: dict
+        :param main_task: task to achieve 
+        :type main_task: cognitive_nodes.goal.Goal
+        """
+
+        """world_model = {"name": wm_name, "node_type": "WorldModel"}
         for idx, step in enumerate(plan.keys()):
             node_name = f"{main_task}_step_{idx}"
             goal = {"name": "{step}_goal", "node_type": "Goal"}
@@ -100,7 +108,32 @@ class PolicyLLMPlanner(Policy):
                 f"{node_name}_cnode", 
                 "cognitive_nodes.cnode.CNode", 
                 cnode_params
+            )"""
+        created_goals = []
+
+
+        # NOTE is there a way to access wm from main_task ?
+        self.create_node_client(
+            wm_name or "LLM_PLANNER",
+            "cognitive_nodes.world_model.WorldModel" 
+        )
+
+        for idx, item in enumerate(plan.items()):
+            step_name, expected_outcome = item
+
+            goal_params = {
+                "goal_description": step_name,
+                "expected_outcome_description": expected_outcome
+            }
+            self.create_node_client(
+                f"{main_task}_step_{idx}_goal",
+                "cognitive_nodes.goal.GoalMotiven",
+                goal_params
             )
+
+            
+
+
 
 
     def create_node_client(self, name, class_name, parameters={}):
