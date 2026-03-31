@@ -193,8 +193,8 @@ class PolicyLLMPlanner(Policy):
         with open(file_path) as f :
             prompt = f.read()
         
-        prompt = re.sub(r"TASK_PLACEHOLDER", task, prompt)
-        prompt = re.sub(r"PERCEPTION_PLACEHOLDER", perception, prompt)
+        prompt = re.sub(r"{task}", task, prompt)
+        prompt = re.sub(r"{plan}", perception, prompt)
 
         response = self.llm_client.generate(prompt)
 
@@ -208,8 +208,8 @@ class PolicyLLMPlanner(Policy):
         with open(file_path) as f :
             prompt = f.read()
 
-        prompt = re.sub(r"TASK_PLACEHOLDER", task, prompt)
-        prompt = re.sub(r"HIGH_LEVEL_PLAN_PLACEHOLDER", high_level_plan, prompt)
+        prompt = re.sub(r"{task}", task, prompt)
+        prompt = re.sub(r"{plan}", high_level_plan, prompt)
 
         response = self.llm_client.generate(prompt)
 
@@ -223,9 +223,9 @@ class PolicyLLMPlanner(Policy):
         with open(file_path) as f :
             prompt = f.read()
 
-        prompt = re.sub(r"TASK_PLACEHOLDER", task, prompt)
-        prompt = re.sub(r"HIGH_LEVEL_PLAN_PLACEHOLDER", high_level_plan, prompt)
-        prompt = re.sub(r"EO_PLACEHOLDER", expected_outcomes, prompt)
+        prompt = re.sub(r"{task}", task, prompt)
+        prompt = re.sub(r"{plan}", high_level_plan, prompt)
+        prompt = re.sub(r"{EO}", expected_outcomes, prompt)
 
         response = self.llm_client.generate(prompt)
 
