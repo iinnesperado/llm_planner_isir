@@ -57,7 +57,7 @@ class PolicyLLMPlanner(Policy):
         self.get_logger().info(f"Configuring Policies: {policies}") #TODO: Possibility of using new policies added in LTM
         return policies
     
-    def execute_callback(self, request, response):
+    async def execute_callback(self, request, response):
         """
 
         :param request: The request to execute the policy.
@@ -70,12 +70,40 @@ class PolicyLLMPlanner(Policy):
         perception_dict = perception_msg_to_dict(request.perception)
         self.get_logger().info(f"Reveived perception: {perception_dict}")
 
-        plan = self.resquest_llm_plan(task, policies)
+        goal_name = "placeholder" # TODO figure out how to get the goal node name that triggered the policy
+
+        plan = self.resquest_llm_plan(goal_name)
         self.get_logger().info(f"LLM generated plan: {plan}")
 
-        self.create_cnodes_from_plan(plan)
+        for idx, policy in enumerate(plan): 
+            self.get_logger().info(f"Executing plan step {idx}: {policy}...")
 
-        response.policy = self.name
+            name = re.sub(r"_goal", "", goal_name)
+            pnode_name = f"{name}_step_{idx}_pnode"
+            # TODO create pnode that corresponds to the perception
+
+            if policy not in self.policies:
+                self.get_logger().error("LLM DID NOT RETURN A VALID POLICY. CHOOSING RANDOMLY...")
+                return
+            
+            if policy not in self.node_clients :
+                self.node_clients[policy] = ServiceClientAsync(self, Execute, f"policy/{policy}/execute", callback_group=self.cbgroup_client)
+            self.get_logger().info(f"Executing plan step {idx}: {policy}...")
+            await self.node_client[policy].send_request_async()
+
+            cnode_name = f"{name}_step_{idx}_cnode"
+            neighbors = [
+                {"name": "", "node_type": "WorldModel"},
+                {"name": goal_name, "node_type": "Goal"},
+                {"name": pnode_name, "node_type": "PNode"},
+            ]
+            cnode_params = {"neighbors": neighbors}
+            self.create_node_client(cnode_name, "cognitive_nodes.cnode.CNode", cnode_params)
+
+            # TODO add the cnode as neighbor to the executed policy 
+
+
+        response.policy = self.name # NOTE to decide if to leave like this (mainly bc i don't know if its used for something)
         self.get_logger().info(f"Policy {self.name} executed successfully.")
 
         return response
@@ -109,10 +137,13 @@ class PolicyLLMPlanner(Policy):
     # EO FRAMEWORK #
     ################
 
-    def resquest_llm_plan(self, task, policies):
+    def resquest_llm_plan(self, task):
         """
         Generates a plan to accomplish the given task and taking into account the perception of the robot.
         This plan follows the Expected Outcomes Framework.
+
+        :return: plan with each policy to follow 
+        :rtyle: list (policies)
         """
 
         self.get_logger().info(f"Making plan for {task} task/goal...")
@@ -123,7 +154,7 @@ class PolicyLLMPlanner(Policy):
         expected_outcomes = self.predict_outcomes(task, high_level_plan)
         self.get_logger().info(f"Expected outcomes : \n{expected_outcomes}")
 
-        low_level_plan = self.low_level_plan(task, high_level_plan, expected_outcomes, self.policies)
+        low_level_plan = self.low_level_plan(task, high_level_plan, expected_outcomes)
         self.get_logger().info(f"Low level plan : \n{low_level_plan}")
 
         return low_level_plan
@@ -157,7 +188,7 @@ class PolicyLLMPlanner(Policy):
 
         return response
     
-    def low_level_plan(self, task, high_level_plan, expected_outcomes, skills):
+    def low_level_plan(self, task, high_level_plan, expected_outcomes):
         """
         Generates the low level plan for the robot of a high level plan, its expected outcomes of the given task.
         """
@@ -168,6 +199,7 @@ class PolicyLLMPlanner(Policy):
         prompt = re.sub(r"{task}", task, prompt)
         prompt = re.sub(r"{plan}", high_level_plan, prompt)
         prompt = re.sub(r"{EO}", expected_outcomes, prompt)
+        # TODO add skills to come from the LTM for the prompt 
 
         response = self.llm_client.generate(prompt)
 
