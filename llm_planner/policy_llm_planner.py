@@ -12,16 +12,16 @@ from copy import deepcopy
 
 from cognitive_nodes.drive import Drive
 from cognitive_nodes.goal import Goal
-from cognitive_nodes.policy import Policy, PolicyBlocking
+from cognitive_nodes.policy import Policy
 from core.service_client import ServiceClient, ServiceClientAsync
 from core.utils import actuation_dict_to_msg, perception_msg_to_dict, actuation_msg_to_dict, EncodableDecodableEnum
 
 from std_msgs.msg import String
-from core_interfaces.srv import GetNodeFromLTM, CreateNode
+from core_interfaces.srv import GetNodeFromLTM, CreateNode, UpdateNeighbor
 from cognitive_node_interfaces.srv import Execute, Predict
 from cognitive_node_interfaces.msg import Episode as EpisodeMsg
+from cognitive_node_interfaces.msg import PerceptionStamped
 from cognitive_processes_interfaces.msg import ControlMsg
-from simulators.pump_panel_sim_discrete import PumpObjects
 
 from llm_planner.llm_client import LLMClient # TODO check if the import is right for the ros thing
 
@@ -35,6 +35,8 @@ class PolicyLLMPlanner(Policy):
 
         self.llm_client = LLMClient(model_name=llm_model_name)
         self.prompt_dir = os.path.join(pathlib.Path(__file__).parent.resolve(), "prompts")
+
+        self.cofigure_perception()
         
     def request_ltm(self):
         """
@@ -57,6 +59,18 @@ class PolicyLLMPlanner(Policy):
         self.get_logger().info(f"Configuring Policies: {policies}") #TODO: Possibility of using new policies added in LTM
         return policies
     
+    def cofigure_perception(self):
+        """
+        Work in progress.
+        """
+        self.perception_sub = self.create_subscription(
+            PerceptionStamped, 
+            "perception/" + str(self.name) + "/value", # TODO check if the name is correct for the service 
+            self.perception_callback, 
+            1, 
+            callback_group=self.cbgroup_perception
+        )
+    
     async def execute_callback(self, request, response):
         """
 
@@ -70,17 +84,24 @@ class PolicyLLMPlanner(Policy):
         perception_dict = perception_msg_to_dict(request.perception)
         self.get_logger().info(f"Reveived perception: {perception_dict}")
 
-        goal_name = "placeholder" # TODO figure out how to get the goal node name that triggered the policy
+        goal = self.get_high_level_goal()
 
-        plan = self.resquest_llm_plan(goal_name)
+        plan = self.resquest_llm_plan(goal)
         self.get_logger().info(f"LLM generated plan: {plan}")
 
-        for idx, policy in enumerate(plan): 
+        name = re.sub(r"_goal", "", goal)
+
+        for idx, policy in plan.items(): 
             self.get_logger().info(f"Executing plan step {idx}: {policy}...")
 
-            name = re.sub(r"_goal", "", goal_name)
+            # TODO create the goal node
+            goal_name = f"{name}_step_{idx}_goal"
+            self.create_node_client(goal_name, "cognitive_nodes.goal.GoalMotiven")
+
             pnode_name = f"{name}_step_{idx}_pnode"
-            # TODO create pnode that corresponds to the perception
+            pnode_params = {"space_class" : "SemanticPNode"}
+            self.create_node_client(pnode_name, "", pnode_params)
+            # TODO call for the service to inject percetion in the pnode
 
             if policy not in self.policies:
                 self.get_logger().error("LLM DID NOT RETURN A VALID POLICY. CHOOSING RANDOMLY...")
@@ -100,7 +121,12 @@ class PolicyLLMPlanner(Policy):
             cnode_params = {"neighbors": neighbors}
             self.create_node_client(cnode_name, "cognitive_nodes.cnode.CNode", cnode_params)
 
-            # TODO add the cnode as neighbor to the executed policy 
+            # TODO add the cnode as neighbor to the executed policy
+            sucess = self.add_neighbor(cnode_name, policy) 
+            if sucess:
+                self.get_logger().info(f"Successfully created the Cnode {cnode_name} and linked to policy {policy}")
+            else :
+                self.get_logger().error("ERROR Policy of the steps hasn't been linked to corresponding Cnode")
 
 
         response.policy = self.name # NOTE to decide if to leave like this (mainly bc i don't know if its used for something)
@@ -132,18 +158,70 @@ class PolicyLLMPlanner(Policy):
         )
         return response.created
     
+    def perception_callback(self, msg):
+        # NOTE does this take the last message on the topic value of perception ? i guess ...
+        self.perception_dict = self.perception_msg_to_dict(msg.perception)
+
+
+    def get_high_level_goal(self):
+        """
+        Retrieves the high level goal of the cnode calling the policy LLM Planner.
+        We suppose that the policy LLM Planner has the cnode that calls for him as a neighbor.
+        """
+
+        goal = ""
+        ltm_cache = self.request_ltm()
+        data = next((nodes_dict[self.name] for nodes_dict in ltm_cache.values() if self.name in nodes_dict))
+        neighbors = data['neighbors']
+        cnode_name = None
+
+        for node in neighbors:
+            if node['node_type'] == 'Cnode':
+                cnode_name = node['name']
+
+        if cnode_name is None:
+            self.get_logger().error("ERROR LLM Planner doesn't have a Cnode as neighbor")
+        else :
+            data = next((nodes_dict[cnode_name] for nodes_dict in ltm_cache.values() if cnode_name in nodes_dict))
+            neighbors = data['neighbors']
+
+            for node in neighbors:
+                if node['node_type'] == 'Goal':
+                    goal = node['name']
+
+            self.get_logger().info(f"GOAL of the LLMPlanner : {goal}")
+        
+        return goal
+
+    def add_neighbor(self, node_name, neighbor_name):
+        """
+        This method adds a neighbor to a node in the LTM.
+
+        :param node_name: Name of the node to which the neighbor will be added.
+        :type node_name: str
+        :param neighbor_name: Name of the neighbor to be added.
+        :type neighbor_name: str
+        :return: True if the neighbor was added successfully, False otherwise.
+        :rtype: bool
+        """
+        service_name=f"{self.LTM_id}/update_neighbor"
+        if service_name not in self.node_clients:
+            self.node_clients[service_name] = ServiceClient(UpdateNeighbor, service_name)
+        response=self.node_clients[service_name].send_request(node_name=node_name, neighbor_name=neighbor_name, operation=True)
+        return response.success
+
 
     ################
     # EO FRAMEWORK #
     ################
 
-    def resquest_llm_plan(self, task):
+    def resquest_llm_plan(self, task, perception):
         """
         Generates a plan to accomplish the given task and taking into account the perception of the robot.
         This plan follows the Expected Outcomes Framework.
 
-        :return: plan with each policy to follow 
-        :rtyle: list (policies)
+        :return: plan with each policy names to follow, they should be existing policies available in the LTM.
+        :rtype: dict[int->str]
         """
 
         self.get_logger().info(f"Making plan for {task} task/goal...")
