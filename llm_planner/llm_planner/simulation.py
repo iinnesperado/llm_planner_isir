@@ -207,4 +207,15 @@ class LLMSim(Node):
         
         self.perception_pub.publish(msg)
         self.get_logger().debug(f"Published perception: {perception_dict}")
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = LLMSim()
+    rclpy.spin(node)
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
  

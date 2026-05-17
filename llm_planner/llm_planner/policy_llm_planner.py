@@ -23,7 +23,7 @@ from cognitive_node_interfaces.msg import Episode as EpisodeMsg
 from cognitive_node_interfaces.msg import PerceptionStamped
 from cognitive_processes_interfaces.msg import ControlMsg
 
-from llm_planner.llm_client import LLMClient # TODO check if the import is right for the ros thing
+from ros2_ws.src.wp5_gii.emdb_llm_planner_isir.llm_planner.llm_planner.llm_client import LLMClient # TODO check if the import is right for the ros thing
 
 # NOTE check if drive class should be defined 
 

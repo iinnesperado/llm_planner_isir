@@ -2,6 +2,11 @@
 Simple test script to demonstrate FrankaSimulator and SemanticPerceptionConverter
 without needing ROS running. Use this to test before integrating with ROS node.
 """
+import sys
+from pathlib import Path
+
+# Add parent directory to path so we can import llm_planner modules
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from simulation import FrankaSimulator, SemanticPerceptionConverter
 import yaml
