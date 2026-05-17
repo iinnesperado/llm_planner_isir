@@ -1,0 +1,39 @@
+# Franka Simulation Configuration
+# Define the world objects and their initial state
+
+world_objects:
+  mug:
+    location: 'table'
+    type: 'cup'
+    subparts:
+      - 'body'
+      - 'handle'
+  
+  plate:
+    location: 'table'
+    type: 'container'
+    subparts:
+      - 'body'
+  
+  bottle:
+    location: 'shelf'
+    type: 'container'
+    subparts:
+      - 'body'
+      - 'cap'
+  
+  banana:
+    location: 'table'
+    type: 'fruit'
+    subparts:
+      - 'body'
+
+# Initial robot location
+initial_location: 'base'
+
+# Locations in the environment
+locations:
+  - 'base'       # Robot base
+  - 'table'      # Main table
+  - 'shelf'      # High shelf
+  - 'trash'      # Trash bin
