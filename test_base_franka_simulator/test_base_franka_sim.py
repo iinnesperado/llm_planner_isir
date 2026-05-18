@@ -8,7 +8,7 @@ from pathlib import Path
 # Add parent directory to path so we can import llm_planner modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from simulation import FrankaSimulator, SemanticPerceptionConverter
+from ros2_ws.src.wp5_gii.emdb_llm_planner_isir.simulators.base_franka_semantic_sim import FrankaSimulator, SemanticPerceptionConverter
 import yaml
 
 
@@ -26,18 +26,18 @@ def test_franka_simulator():
     world_objects = {
         'mug': {
             'location': 'table',
-            'type': 'cup',
-            'subparts': ['body', 'handle']
+            # 'type': 'cup',
+            # 'subparts': ['body', 'handle']
         },
         'plate': {
             'location': 'table',
-            'type': 'container',
-            'subparts': ['body']
+            # 'type': 'container',
+            # 'subparts': ['body']
         },
         'bottle': {
             'location': 'shelf',
-            'type': 'container',
-            'subparts': ['body', 'cap']
+            # 'type': 'container',
+            # 'subparts': ['body', 'cap']
         }
     }
     
@@ -56,8 +56,8 @@ def test_franka_simulator():
     print(f"Grasped objects: {perception['grasped_obj']}")
     
     # Test 1: Grasp object
-    print("\n--- Test 1: Grasp mug by handle ---")
-    success = sim.grasp_object('mug', 'handle')
+    print("\n--- Test 1: Grasp mug ---")
+    success = sim.grasp_object('mug')
     print(f"✓ Grasped: {success}")
     state = sim.get_state()
     perception = converter.state_to_perception_dict(state, {
@@ -95,7 +95,7 @@ def test_franka_simulator():
     # Test 4: Move back and grasp bottle
     print("\n--- Test 4: Move back to table and grasp bottle ---")
     sim.move_to_location('table')
-    success = sim.grasp_object('bottle', 'cap')
+    success = sim.grasp_object('bottle')
     print(f"✓ Grasped bottle by cap: {success}")
     state = sim.get_state()
     perception = converter.state_to_perception_dict(state, {

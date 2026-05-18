@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'llm_planner'
+package_name = 'franka_llm_sim'
 
 setup(
     name=package_name,
@@ -11,17 +11,16 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools', 'pyyaml', 'numpy'],
+    install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='ines',
-    maintainer_email='ines@example.com',
-    description='LLM-based planning with Expected Outcomes Framework for robotic manipulation tasks',
+    maintainer='sergio',
+    maintainer_email='sergio.martinez3@udc.es',
+    description='TODO: Package description',
     license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'llm_simulation = llm_planner.simulation_node:main',
-            'policy_llm_planner = llm_planner.policy_llm_planner:main',
+            'franka_llm_simulator = franka_llm_sim.franka_simulator:main',
         ],
     },
 )

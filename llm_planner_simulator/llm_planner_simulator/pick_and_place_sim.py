@@ -1,14 +1,12 @@
+import yaml
+from copy import copy, deepcopy
 import rclpy
 from rclpy.node import Node
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rcl_interfaces.msg import ParameterDescriptor
-from core.utils import class_from_classname
 import yaml
-import copy
 
 from cognitive_node_interfaces.msg import PerceptionStamped
-from std_msgs.msg import String
-from core_interfaces.srv import LoadConfig
 
 
 class SemanticPerceptionConverter:
@@ -50,25 +48,26 @@ class SemanticPerceptionConverter:
 class FrankaSimulator:
     """
     Discrete event simulator for Franka robotic arm with semantic perception.
+    Pure Python implementation - no ROS dependencies.
     """
     def __init__(self):
         # Franka state
         self.joint_angles = [0.0] * 7  # 7-DOF arm
         self.gripper_width = 0.04      # Open (meters)
         self.gripper_force = 0.0
-        self.location = "base"         # Current location
+        self.location = "table"         # Current location
         
         # Object tracking
         self.grasped_object = None     # Currently held object
-        self.grasped_part = "body"     # Which part of object is grasped
-        self.world_objects = {}        # {obj_id: {location, type, subparts}}
+        # self.grasped_part = "body"     # Which part of object is grasped
+        self.world_objects = {}        # {obj_id: location}
         self.visible_objects = {}      # Objects in current FOV
         
-    def grasp_object(self, obj_id, subpart="body"):
+    def grasp_object(self, obj_id):
         """Grasp an object if it's visible"""
         if obj_id in self.visible_objects:
             self.grasped_object = obj_id
-            self.grasped_part = subpart
+            # self.grasped_part = subpart
             self.gripper_width = 0.0
             self.visible_objects.pop(obj_id)  # Remove from visible
             return True
@@ -80,17 +79,18 @@ class FrankaSimulator:
             self.world_objects[self.grasped_object]['location'] = location
             self.visible_objects[self.grasped_object] = self.world_objects[self.grasped_object]
             self.grasped_object = None
-            self.grasped_part = "body"
+            # self.grasped_part = "body"
             self.gripper_width = 0.04
             return True
         return False
     
     def move_to_location(self, location):
         """Move to a new location"""
-        if location in self.world_objects or location == "base":
-            self.location = location
-            self.update_visible_objects()
-            return True
+        for _, obj_data in self.world_objects.items():
+            if obj_data.get('location')==location or location == "base":
+                self.location = location
+                self.update_visible_objects()
+                return True
         return False
     
     def update_visible_objects(self):
@@ -103,20 +103,25 @@ class FrankaSimulator:
     def get_state(self):
         """Get current arm state"""
         return {
-            'joint_angles': copy.copy(self.joint_angles),
+            'joint_angles': copy(self.joint_angles),
             'gripper_width': self.gripper_width,
             'location': self.location,
-            'grasped_object': self.grasped_object,
-            'grasped_part': self.grasped_part,
+            'grasped_object': self.grasped_object
         }
     
     def set_world_objects(self, objects_dict):
         """Initialize world objects: {obj_id: {location, type, subparts}}"""
-        self.world_objects = copy.deepcopy(objects_dict)
+        self.world_objects = deepcopy(objects_dict)
+        print(self.world_objects)
         self.update_visible_objects()
 
 
-class LLMSim(Node):
+class PickAndPlaceSim(Node):
+    """
+    ROS 2 node that wraps FrankaSimulator and publishes semantic perception.
+    Basic first implementation to test LLMPlannerPolicy.
+    """
+    
     def __init__(self):
         super().__init__("LLMSimulation")
         
@@ -150,8 +155,8 @@ class LLMSim(Node):
         Load simulation configuration from YAML file.
         Expected format:
         world_objects:
-          mug: {location: 'table', type: 'cup', subparts: ['body', 'handle']}
-          plate: {location: 'table', type: 'container', subparts: ['body']}
+          mug: {location: 'table}
+          plate: {location: 'table'}
         initial_location: 'base'
         """
         if self.config_file:
@@ -211,11 +216,15 @@ class LLMSim(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = LLMSim()
-    rclpy.spin(node)
-    rclpy.shutdown()
+    sim = LLMSim()
+    
+    try:
+        rclpy.spin(sim)
+    except KeyboardInterrupt:
+        print('Keyboard Interruption Detected: Shutting down Simulator...')
+    finally:
+        sim.destroy_node()
 
 
 if __name__ == '__main__':
     main()
- 

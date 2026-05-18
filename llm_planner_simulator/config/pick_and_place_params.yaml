@@ -4,29 +4,15 @@
 world_objects:
   mug:
     location: 'table'
-    type: 'cup'
-    subparts:
-      - 'body'
-      - 'handle'
   
   plate:
     location: 'table'
-    type: 'container'
-    subparts:
-      - 'body'
   
   bottle:
     location: 'shelf'
-    type: 'container'
-    subparts:
-      - 'body'
-      - 'cap'
   
   banana:
     location: 'table'
-    type: 'fruit'
-    subparts:
-      - 'body'
 
 # Initial robot location
 initial_location: 'base'
