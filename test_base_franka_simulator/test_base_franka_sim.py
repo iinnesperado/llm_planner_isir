@@ -8,7 +8,7 @@ from pathlib import Path
 # Add parent directory to path so we can import llm_planner modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from ros2_ws.src.wp5_gii.emdb_llm_planner_isir.simulators.base_franka_semantic_sim import FrankaSimulator, SemanticPerceptionConverter
+from base_franka_semantic_sim import FrankaSimulator, SemanticPerceptionConverter
 import yaml
 
 

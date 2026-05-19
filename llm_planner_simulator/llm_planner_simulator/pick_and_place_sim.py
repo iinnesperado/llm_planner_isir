@@ -1,12 +1,14 @@
 import yaml
 from copy import copy, deepcopy
+import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rcl_interfaces.msg import ParameterDescriptor
-import yaml
 
 from cognitive_node_interfaces.msg import PerceptionStamped
+from cognitive_node_interfaces.srv import Execute, Predict
+
 
 
 class SemanticPerceptionConverter:
@@ -55,7 +57,7 @@ class FrankaSimulator:
         self.joint_angles = [0.0] * 7  # 7-DOF arm
         self.gripper_width = 0.04      # Open (meters)
         self.gripper_force = 0.0
-        self.location = "table"         # Current location
+        self.location = "base"         # Current location
         
         # Object tracking
         self.grasped_object = None     # Currently held object
@@ -173,13 +175,16 @@ class PickAndPlaceSim(Node):
                 if 'initial_location' in config:
                     self.franka_sim.location = config['initial_location']
                     self.franka_sim.update_visible_objects()
+
+                if 'locations' in config:
+                    self.world_locations = deepcopy(config['locations'])
                 
             except Exception as e:
                 self.get_logger().warn(f"Could not load config file: {e}")
     
-    def grasp_object_policy(self, obj_id, subpart="body"):
+    def grasp_object_policy(self, obj_id):
         """Grasp an object if it's visible at current location"""
-        success = self.franka_sim.grasp_object(obj_id, subpart)
+        success = self.franka_sim.grasp_object(obj_id)
         self.publish_perceptions()
         return success
     
@@ -213,10 +218,50 @@ class PickAndPlaceSim(Node):
         self.perception_pub.publish(msg)
         self.get_logger().debug(f"Published perception: {perception_dict}")
 
+    def world_reset_service_callback(self, request, response):
+        # Reset robot to inital state
+        self.franka_sim.reset_state()
+        # Clear/ reinitialize objects
+        self.random_perceptions()
+        self.publish_perceptions()
+    
+    def random_perceptions(self):
+        """Shuffles the position of objects present in the environment."""
+        world_objects = self.franka_sim.world_objects.keys()
+        for obj in world_objects:
+            obj['location'] = self.world_locations[np.random.randint(0,len(world_objects))]
+
+    def new_command_callback(self, data):
+        """Process a command received"""
+        # NOTE dont really understand its role 
+
+    def new_action_service_callback(self, request, response):
+        """Execute the policy and publish perceptions."""
+        self.get_logger().info("Executing policy " + str(request.policy))
+        self.get_logger().info(f"ITERATION: {self.iteration}")
+        # TODO add perception update here ??
+        self.get_logger().info(f"PERCEPTIONS BEFORE: {self.perceptions}")
+        self.get_logger().info(f"POLICY TO EXECUTE: {request.policy}")
+        getattr(self, request.policy + "_policy")()
+        self.perceive_closest_fruit()
+        self.get_logger().info(f"FRUITS AFTER POLICY: {self.fruits}")
+        self.get_logger().info(f"CATCHED FRUIT AFTER: {self.catched_fruit}")
+        self.get_logger().info(f"PERCEPTIONS AFTER: {self.perceptions}")
+        self.update_reward_sensor()
+        self.publish_perceptions()
+        if (not self.catched_fruit) and (
+            self.perceptions["fruit_in_left_hand"].data
+            or self.perceptions["fruit_in_right_hand"].data
+        ):
+            self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
+            rclpy.shutdown()
+        response.success = True
+        return response
+
 
 def main(args=None):
     rclpy.init(args=args)
-    sim = LLMSim()
+    sim = PickAndPlaceSim()
     
     try:
         rclpy.spin(sim)
