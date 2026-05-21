@@ -1,259 +1,262 @@
 import yaml
+import yamlloader
 from copy import copy, deepcopy
 import numpy as np
+import os
 import rclpy
 from rclpy.node import Node
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rcl_interfaces.msg import ParameterDescriptor
 
-from cognitive_node_interfaces.msg import PerceptionStamped
-from cognitive_node_interfaces.srv import Execute, Predict
+from core.service_client import ServiceClient
+from core.interface.srv import LoadConfig
+from core.utils import class_from_classname
 
 
 
-class SemanticPerceptionConverter:
+
+class PickAndPlaceSim(Node):
     """
-    Converts Franka simulator state to semantic perception format compatible with space.py
+    Basic first implementation to test LLMPlannerPolicy.
+
+    Experiment information:
+        - a robotic arm like Franka 
+        - general goal is to keep the table clean
+        - the posible locations for the objects are: 
+            - table (init location)
+            - toolbox
+            - trash
+            - in_hand
+        - only objects on top of the table are visible and pickable
+        - the robot reaches all the locations to place the objects
     """
-    def __init__(self):
-        self.location_names = {
-            "base": "robot_base",
-            "table": "table_top",
-            "gripper": "in_gripper"
-        }
     
-    def state_to_perception_dict(self, arm_state, world_state):
-        """
-        Convert simulator state to semantic perception dict.
-        
-        Expected output format (from space.py):
-        {
-            'location': str,           # robot location
-            'grasped_obj': dict,       # what's in gripper {obj_id: part}
-            'known_obj': dict,         # all known objects {obj_id: location}
-            'observed_obj': dict,      # currently visible objects
-        }
-        """
-        grasped_obj = {}
-        if arm_state['grasped_object']:
-            grasped_obj[arm_state['grasped_object']] = arm_state.get('grasped_part', 'body')
-        
-        perception_dict = {
-            'location': arm_state.get('location', 'base'),
-            'grasped_obj': grasped_obj,
-            'known_obj': world_state.get('objects', {}),
-            'observed_obj': world_state.get('visible_objects', {}),
-        }
-        return perception_dict
-
-
-class FrankaSimulator:
-    """
-    Discrete event simulator for Franka robotic arm with semantic perception.
-    Pure Python implementation - no ROS dependencies.
-    """
     def __init__(self):
-        # Franka state
-        self.joint_angles = [0.0] * 7  # 7-DOF arm
-        self.gripper_width = 0.04      # Open (meters)
-        self.gripper_force = 0.0
-        self.location = "base"         # Current location
+        super().__init__("PickAndPlaceSim")
+        # self.rng = None
+        self.perceptions = {}
+        self.base_messages = {}
+        self.sim_publishers = {}        # dict {sim_id: publisher}
+
+        self.random_seed = self.declare_parameter('random_seed', value = 0).get_parameter_value().integer_value
+        self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
+
+        self.objects = {}
+        self.visible_objects = {}
+        self.object_to_pick = None      # string
+        self.grasped_object = None      # check if the robot has already an object
+        self.grasped_part = None
         
-        # Object tracking
-        self.grasped_object = None     # Currently held object
-        # self.grasped_part = "body"     # Which part of object is grasped
-        self.world_objects = {}        # {obj_id: location}
-        self.visible_objects = {}      # Objects in current FOV
+        # Callback groups for concurrency
+        self.cbgroup_server=MutuallyExclusiveCallbackGroup()
+        self.cbgroup_client=MutuallyExclusiveCallbackGroup()
         
-    def grasp_object(self, obj_id):
-        """Grasp an object if it's visible"""
+        self.load_configuration()
+        self.load_client=ServiceClient(LoadConfig, 'commander/load_experiment')
+        self.get_logger().info("PickAndPlaceSim initialized")
+    
+    def load_configuration(self):
+        """
+        Load the configuration file and setup the simulator.
+        """
+        if self.config_file is None:
+            self.get_logger().error("No configuration file for the LTM simulator specified!")
+            rclpy.shutdown()
+        else:
+            if not os.path.isfile(self.config_file):
+                self.get_logger().error(self.config_file + " does not exist!")
+                rclpy.shutdown()
+            else:
+                self.get_logger().info(f"Loading configuration from {self.config_file}...")
+                config = yaml.load(
+                    open(self.config_file, "r", encoding="utf-8"),
+                    Loader=yamlloader.ordereddict.CLoader,
+                )
+                self.setup_perceptions(config["DiscreteEventSimulator"]["Perceptions"])
+                # Be ware, we can not subscribe to control channel before creating all sensor publishers.
+                self.setup_control_channel(config["Control"])
+
+                self.setup_objects(config["DiscreteEventSimulator"]["Objects"])
+
+        self.load_experiment_file_in_commander()
+
+    def setup_perceptions(self, perceptions):
+        """
+        Configure the ROS topics where the simulator will publish the perceptions.
+        
+        :param perceptions: A list of dictionaries where each dictionary contains the name, perception topic, and perception message class.
+        :type perceptions: list
+        """
+        for perception in perceptions:
+            sid = perception["name"]
+            topic = perception["perception_topic"]
+            classname = perception["perception_msg"]
+            message = class_from_classname(classname)
+            self.perceptions[sid] = message()
+            if "List" in classname:
+                self.perceptions[sid].data = []
+                self.base_messages[sid] = class_from_classname(classname.replace("List", ""))
+            else:
+                self.perceptions[sid].data = False
+            self.get_logger().info("I will publish to... " + str(topic))
+            self.sim_publishers[sid] = self.create_publisher(message, topic, 0)
+    
+    def setup_control_channel(self, simulation):
+        """
+        Configure the ROS topic/service where listen for commands to be executed.
+
+        :param simulation: The params from the config file to setup the control channel.
+        :type simulation: dict
+        """
+        self.ident = simulation["id"]
+        topic = simulation["control_topic"]
+        classname = simulation["control_msg"]
+        message = class_from_classname(classname)
+        self.get_logger().info("Subscribing to... " + str(topic))
+        self.create_subscription(message, topic, self.new_command_callback, 0)
+        service_policy = simulation.get("executed_policy_service")
+        service_world_reset = simulation.get("world_reset_service")
+
+        if service_policy:
+            self.get_logger().info("Creating server... " + str(service_policy))
+            classname = simulation["executed_policy_msg"]
+            message_policy_srv = class_from_classname(classname)
+            self.create_service(message_policy_srv, service_policy, self.new_action_service_callback, callback_group=self.cbgroup_server)
+            self.get_logger().info("Creating perception publisher timer... ")
+            self.perceptions_timer = self.create_timer(0.01, self.publish_perceptions, callback_group=self.cbgroup_server)
+
+        if service_world_reset:
+            self.message_world_reset = class_from_classname(simulation["world_reset_msg"])
+            self.create_service(self.message_world_reset, service_world_reset, self.world_reset_service_callback, callback_group=self.cbgroup_server)
+    
+    def setup_objects(self, objects):
+        for obj in objects:
+            self.objects[obj['id']] = dict(subpart=obj['subpart'], location=obj['location'])
+    
+    def load_experiment_file_in_commander(self):
+        """
+        Load the configuration file in the commander node.
+
+        :return: Response from the commander node indicating the success of the loading.
+        :rtype: core_interfaces.srv.LoadConfig.Response
+        """
+        loaded = self.load_client.send_request(file = self.config_file)
+        return loaded
+    
+    def random_object_to_pick(self):
+        """Randomly select and object to pick from the available objects."""
+        self.update_visible_objects()
+        
+        # self.object_to_pick = 
+    
+    def pick_object_policy(self):
+        """Grasp an object if it's visible at current location"""
         if obj_id in self.visible_objects:
             self.grasped_object = obj_id
-            # self.grasped_part = subpart
-            self.gripper_width = 0.0
+            if subpart in self.visible_objects[obj_id].get("subpart"):
+                self.grasped_part = subpart
+            else:
+                self.get_logger().error(f"Subpart {subpart} is not defined for object {obj_id}.")
+                return False
+            
+            self.objects[obj_id]["location"] = "in_hand"
             self.visible_objects.pop(obj_id)  # Remove from visible
+            self.perceptions["grasped_object"].data = True
+
+            self.publish_perceptions()
             return True
+        else:
+            self.get_logger().error(f"Object {obj_id} is not on the table and thus cannot be picked.")
         return False
     
-    def place_object(self, location):
-        """Place grasped object at location if gripper holds something"""
+    def place_object_policy(self):
+        """Place currently grasped object at location"""
         if self.grasped_object:
-            self.world_objects[self.grasped_object]['location'] = location
-            self.visible_objects[self.grasped_object] = self.world_objects[self.grasped_object]
+            self.objects[self.grasped_object]['location'] = location
+            
             self.grasped_object = None
-            # self.grasped_part = "body"
-            self.gripper_width = 0.04
+            self.grasped_part = None
+            self.perceptions["grasped_object"].data = False
+
+            self.publish_perceptions()
             return True
-        return False
-    
-    def move_to_location(self, location):
-        """Move to a new location"""
-        for _, obj_data in self.world_objects.items():
-            if obj_data.get('location')==location or location == "base":
-                self.location = location
-                self.update_visible_objects()
-                return True
         return False
     
     def update_visible_objects(self):
         """Update which objects are visible at current location"""
         self.visible_objects = {}
-        for obj_id, obj_data in self.world_objects.items():
-            if obj_data.get('location') == self.location and obj_id != self.grasped_object:
+        for obj_id, obj_data in self.objects.items():
+            if obj_data.get('location') == "table" and obj_id != self.grasped_object:
                 self.visible_objects[obj_id] = obj_data
-    
-    def get_state(self):
-        """Get current arm state"""
-        return {
-            'joint_angles': copy(self.joint_angles),
-            'gripper_width': self.gripper_width,
-            'location': self.location,
-            'grasped_object': self.grasped_object
-        }
-    
-    def set_world_objects(self, objects_dict):
-        """Initialize world objects: {obj_id: {location, type, subparts}}"""
-        self.world_objects = deepcopy(objects_dict)
-        print(self.world_objects)
-        self.update_visible_objects()
 
-
-class PickAndPlaceSim(Node):
-    """
-    ROS 2 node that wraps FrankaSimulator and publishes semantic perception.
-    Basic first implementation to test LLMPlannerPolicy.
-    """
-    
-    def __init__(self):
-        super().__init__("LLMSimulation")
-        
-        # Callback groups for concurrency
-        self.cbgroup_server = ReentrantCallbackGroup()
-        self.cbgroup_perception = ReentrantCallbackGroup()
-        
-        # Simulators
-        self.franka_sim = FrankaSimulator()
-        self.perception_converter = SemanticPerceptionConverter()
-        
-        # Publisher for semantic perception
-        self.perception_pub = self.create_publisher(
-            PerceptionStamped,
-            "perception/llm_planner/value",
-            1,
-            callback_group=self.cbgroup_perception
-        )
-        
-        # Configuration
-        self.config_file = self.declare_parameter(
-            'config_file',
-            descriptor=ParameterDescriptor(dynamic_typing=True)
-        ).get_parameter_value().string_value
-        
-        self.load_configuration()
-        self.get_logger().info("LLMSimulation initialized")
-    
-    def load_configuration(self):
-        """
-        Load simulation configuration from YAML file.
-        Expected format:
-        world_objects:
-          mug: {location: 'table}
-          plate: {location: 'table'}
-        initial_location: 'base'
-        """
-        if self.config_file:
-            try:
-                with open(self.config_file, 'r') as f:
-                    config = yaml.safe_load(f)
-                
-                # Load world objects
-                if 'world_objects' in config:
-                    self.franka_sim.set_world_objects(config['world_objects'])
-                    self.get_logger().info(f"Loaded objects: {list(config['world_objects'].keys())}")
-                
-                # Set initial location
-                if 'initial_location' in config:
-                    self.franka_sim.location = config['initial_location']
-                    self.franka_sim.update_visible_objects()
-
-                if 'locations' in config:
-                    self.world_locations = deepcopy(config['locations'])
-                
-            except Exception as e:
-                self.get_logger().warn(f"Could not load config file: {e}")
-    
-    def grasp_object_policy(self, obj_id):
-        """Grasp an object if it's visible at current location"""
-        success = self.franka_sim.grasp_object(obj_id)
-        self.publish_perceptions()
-        return success
-    
-    def place_object_policy(self, location):
-        """Place currently grasped object at location"""
-        success = self.franka_sim.place_object(location)
-        self.publish_perceptions()
-        return success
-    
-    def move_to_location_policy(self, location):
-        """Move to a new location"""
-        success = self.franka_sim.move_to_location(location)
-        self.publish_perceptions()
-        return success
+    def update_objects_location_in_perception(self):
+        """Update location data on objects information."""
+        for object in self.perceptions["object"]:
+            object.location = self.objects[object.id]
     
     def publish_perceptions(self):
-        """Publish current semantic perception as PerceptionStamped message"""
-        arm_state = self.franka_sim.get_state()
-        world_state = {
-            'objects': self.franka_sim.world_objects,
-            'visible_objects': self.franka_sim.visible_objects,
-        }
-        
-        perception_dict = self.perception_converter.state_to_perception_dict(arm_state, world_state)
-        
-        # Create PerceptionStamped message
-        msg = PerceptionStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.perception.data = yaml.dump(perception_dict)
-        
-        self.perception_pub.publish(msg)
-        self.get_logger().debug(f"Published perception: {perception_dict}")
+        """
+        Publish the current perceptions to the corresponding topics.
+        """
+        self.update_objects_location_in_perception()
+        for ident, publisher in self.sim_publishers.items():
+            self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
+            publisher.publish(self.perceptions[ident])
 
     def world_reset_service_callback(self, request, response):
         # Reset robot to inital state
-        self.franka_sim.reset_state()
-        # Clear/ reinitialize objects
-        self.random_perceptions()
+        self.grasped_object = None
+        self.grasped_part = None
+
+        # Reinitialize objects
+        self.reset_perceptions()
+        self.update_visible_objects()
         self.publish_perceptions()
     
-    def random_perceptions(self):
-        """Shuffles the position of objects present in the environment."""
-        world_objects = self.franka_sim.world_objects.keys()
-        for obj in world_objects:
-            obj['location'] = self.world_locations[np.random.randint(0,len(world_objects))]
+    def reset_perceptions(self):
+        """
+        Puts all the objects on top of the table.
+        We consider the location 'table' to be the init location of all objects.
+        """
+        for _,obj_data in self.objects.items():
+            obj_data['location'] = "table"
 
     def new_command_callback(self, data):
-        """Process a command received"""
-        # NOTE dont really understand its role 
+        """
+        Process a command received
+
+        :param data: The message that contais the command received.
+        :type data: ROS msg defined in the config file. Typically cognitive_processes_interfaces.msg.ControlMsg
+        """
+        self.get_logger().debug(f"Command received... ITERATION: {data.iteration}")
+        self.iteration = data.iteration
+        self.update_reward_sensor()
+        if data.command == "reset_world":
+            self.reset_world(data)
+        elif data.command == "end":
+            self.get_logger().info("Ending simulator as requested by LTM...")
+            rclpy.shutdown() 
 
     def new_action_service_callback(self, request, response):
         """Execute the policy and publish perceptions."""
         self.get_logger().info("Executing policy " + str(request.policy))
         self.get_logger().info(f"ITERATION: {self.iteration}")
-        # TODO add perception update here ??
+
+        self.random_object_to_pick()
+
+        self.get_logger().info(f"OBJECTS BEFORE POLICY: {self.objects}")
+        self.get_logger().info(f"GRASPED OBJECT BEFORE: ({self.grasped_object}, {self.grasped_part})")
         self.get_logger().info(f"PERCEPTIONS BEFORE: {self.perceptions}")
         self.get_logger().info(f"POLICY TO EXECUTE: {request.policy}")
-        getattr(self, request.policy + "_policy")()
-        self.perceive_closest_fruit()
-        self.get_logger().info(f"FRUITS AFTER POLICY: {self.fruits}")
-        self.get_logger().info(f"CATCHED FRUIT AFTER: {self.catched_fruit}")
+
+        success = getattr(self, request.policy + "_policy")()
+
+        self.get_logger().info(f"OBJECTS AFTER POLICY: {self.objects}")
+        self.get_logger().info(f"GRASPED OBJECT AFTER: ({self.grasped_object}, {self.grasped_part})")
         self.get_logger().info(f"PERCEPTIONS AFTER: {self.perceptions}")
-        self.update_reward_sensor()
-        self.publish_perceptions()
-        if (not self.catched_fruit) and (
-            self.perceptions["fruit_in_left_hand"].data
-            or self.perceptions["fruit_in_right_hand"].data
-        ):
-            self.get_logger().error("Critical error: catched_object is empty and it should not!!!")
+
+        if not success :
+            self.get_logger().error("Policy execution unsuccessful! Shutting dowm simulator...")
             rclpy.shutdown()
         response.success = True
         return response
