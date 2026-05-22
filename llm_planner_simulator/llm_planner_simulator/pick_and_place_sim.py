@@ -50,6 +50,20 @@ class PickAndPlaceSim(Node):
         # Callback groups for concurrency
         self.cbgroup_server=MutuallyExclusiveCallbackGroup()
         self.cbgroup_client=MutuallyExclusiveCallbackGroup()
+
+        self.pick_object_service = self.create_service(
+            PickObject,
+            "simulator/pick_object",
+            self.pick_object_callback,
+            callback_group= self.cbgroup_server
+        )
+
+        self.place_object_service = self.create_service(
+            PlaceObject,
+            "simulator/pick_object",
+            self.place_object_callback,
+            callback_group= self.cbgroup_server
+        )
         
         self.load_configuration()
         self.load_client=ServiceClient(LoadConfig, 'commander/load_experiment')
@@ -149,7 +163,7 @@ class PickAndPlaceSim(Node):
         
         # self.object_to_pick = 
     
-    def pick_object_policy(self):
+    def pick_object_policy(self, obj_id, subpart):
         """Grasp an object if it's visible at current location"""
         if obj_id in self.visible_objects:
             self.grasped_object = obj_id
@@ -169,7 +183,7 @@ class PickAndPlaceSim(Node):
             self.get_logger().error(f"Object {obj_id} is not on the table and thus cannot be picked.")
         return False
     
-    def place_object_policy(self):
+    def place_object_policy(self, location):
         """Place currently grasped object at location"""
         if self.grasped_object:
             self.objects[self.grasped_object]['location'] = location
