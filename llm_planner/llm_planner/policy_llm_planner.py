@@ -17,7 +17,7 @@ from core.service_client import ServiceClient, ServiceClientAsync
 from core.utils import actuation_dict_to_msg, perception_msg_to_dict, actuation_msg_to_dict, EncodableDecodableEnum
 
 from std_msgs.msg import String
-from core_interfaces.srv import GetNodeFromLTM, CreateNode, UpdateNeighbor
+from core_interfaces.srv import GetNodeFromLTM, CreateNode, UpdateNeighbor, DeleteNode
 from cognitive_node_interfaces.srv import Execute, Predict
 from cognitive_node_interfaces.msg import Episode as EpisodeMsg
 from cognitive_node_interfaces.msg import PerceptionStamped
@@ -84,7 +84,7 @@ class PolicyLLMPlanner(Policy):
         perception_dict = perception_msg_to_dict(request.perception)
         self.get_logger().info(f"Reveived perception: {perception_dict}")
 
-        goal = self.get_high_level_goal()
+        goal = self.get_high_level_goal_name()
 
         plan = self.resquest_llm_plan(goal)
         self.get_logger().info(f"LLM generated plan: {plan}")
@@ -94,28 +94,28 @@ class PolicyLLMPlanner(Policy):
         for idx, policy in plan.items(): 
             self.get_logger().info(f"Executing plan step {idx}: {policy}...")
 
-            # TODO create the goal node
-            goal_name = f"{name}_step_{idx}_goal"
-            self.create_node_client(goal_name, "cognitive_nodes.goal.GoalMotiven")
+            # # TODO create the goal node
+            # goal_name = f"{name}_step_{idx}_goal"
+            # self.create_node_client(goal_name, "cognitive_nodes.goal.GoalMotiven")
 
             pnode_name = f"{name}_step_{idx}_pnode"
-            pnode_params = {"space_class" : "SemanticPNode"}
-            self.create_node_client(pnode_name, "", pnode_params)
+            pnode_params = {"space_class" : "llm_planner.space.SemanticSpace"}
+            self.create_node_client(pnode_name, "cognitive_nodes.pnode.Pnode", pnode_params)
             # TODO call for the service to inject percetion in the pnode
 
-            if policy not in self.policies:
+            if policy['name'] not in self.policies:
                 self.get_logger().error("LLM DID NOT RETURN A VALID POLICY. CHOOSING RANDOMLY...")
                 return
             
-            if policy not in self.node_clients :
-                self.node_clients[policy] = ServiceClientAsync(self, Execute, f"policy/{policy}/execute", callback_group=self.cbgroup_client)
-            self.get_logger().info(f"Executing plan step {idx}: {policy}...")
-            await self.node_client[policy].send_request_async()
+            if policy['name'] not in self.node_clients :
+                self.node_clients[policy['name']] = ServiceClientAsync(self, Execute, f"policy/{policy['name']}/execute", callback_group=self.cbgroup_client)
+            self.get_logger().info(f"Executing plan step {idx}: {policy['name']}...")
+            await self.node_client[policy['name']].send_request_async(**policy['params'])
 
             cnode_name = f"{name}_step_{idx}_cnode"
             neighbors = [
                 {"name": "", "node_type": "WorldModel"},
-                {"name": goal_name, "node_type": "Goal"},
+                {"name": goal, "node_type": "Goal"},
                 {"name": pnode_name, "node_type": "PNode"},
             ]
             cnode_params = {"neighbors": neighbors}
@@ -130,10 +130,20 @@ class PolicyLLMPlanner(Policy):
 
 
         response.policy = self.name # NOTE to decide if to leave like this (mainly bc i don't know if its used for something)
+
+        self.delete_cnode_llm_planner()
+        self.delete_neighbor(self.name, self.get_cnode_name())
+
         self.get_logger().info(f"Policy {self.name} executed successfully.")
 
         return response
 
+    def delete_cnode_llm_planner(self):
+        """Responsible of deleting the cnode that is responsible of the call for the llm planner the whole plan has been executed."""
+        cnode = self.get_cnode_name()
+        deleted = self.delete_node_client(cnode)
+        return deleted
+    
     def create_node_client(self, name, class_name, parameters={}):
         """
         This method calls the add node service of the commander.
@@ -158,26 +168,39 @@ class PolicyLLMPlanner(Policy):
         )
         return response.created
     
+    def delete_node_client(self, name):
+        self.get_logged().info("Requesting node deletion")
+        service_name = "commander/delete"
+        if service_name not in self.node_client:
+            self.node_clients[service_name] = ServiceClient(DeleteNode, service_name)
+        response = self.node_clients[service_name].send_request(name=name)
+        return response.deleted
+    
     def perception_callback(self, msg):
         # NOTE does this take the last message on the topic value of perception ? i guess ...
         self.perception_dict = self.perception_msg_to_dict(msg.perception)
 
-
-    def get_high_level_goal(self):
+    def get_cnode_name(self):
         """
-        Retrieves the high level goal of the cnode calling the policy LLM Planner.
+        Retrives the name of the Cnode calling the policy LLM Planner.
         We suppose that the policy LLM Planner has the cnode that calls for him as a neighbor.
         """
-
-        goal = ""
+        cnode_name = None
         ltm_cache = self.request_ltm()
         data = next((nodes_dict[self.name] for nodes_dict in ltm_cache.values() if self.name in nodes_dict))
         neighbors = data['neighbors']
-        cnode_name = None
 
         for node in neighbors:
             if node['node_type'] == 'Cnode':
                 cnode_name = node['name']
+        
+        return cnode_name
+
+    def get_high_level_goal_name(self):
+        """Retrieves the high level goal of the cnode calling the policy LLM Planner."""
+        goal = None
+        ltm_cache = self.request_ltm()
+        cnode_name = self.get_cnode_name()
 
         if cnode_name is None:
             self.get_logger().error("ERROR LLM Planner doesn't have a Cnode as neighbor")
@@ -209,6 +232,23 @@ class PolicyLLMPlanner(Policy):
             self.node_clients[service_name] = ServiceClient(UpdateNeighbor, service_name)
         response=self.node_clients[service_name].send_request(node_name=node_name, neighbor_name=neighbor_name, operation=True)
         return response.success
+    
+    def delete_neighbor(self, node_name, neighbor_name):
+        """
+        This method deletes a neighbor to a node in the LTM.
+
+        :param node_name: Name of the node to which the neighbor will be deleted.
+        :type node_name: str
+        :param neighbor_name: Name of the neighbor to be deleted.
+        :type neighbor_name: str
+        :return: True if the neighbor was deleted successfully, False otherwise.
+        :rtype: bool
+        """
+        service_name=f"{self.LTM_id}/update_neighbor"
+        if service_name not in self.node_clients:
+            self.node_clients[service_name] = ServiceClient(UpdateNeighbor, service_name)
+        response=self.node_clients[service_name].send_request(node_name=node_name, neighbor_name=neighbor_name, operation=False)
+        return response.success
 
 
     ################
@@ -221,7 +261,7 @@ class PolicyLLMPlanner(Policy):
         This plan follows the Expected Outcomes Framework.
 
         :return: plan with each policy names to follow, they should be existing policies available in the LTM.
-        :rtype: dict[int->str]
+        :rtype: dict    {1: {name: grasp_object, params: {obj_id: 'mug', subpart: 'body'}}, 2: ...}
         """
 
         self.get_logger().info(f"Making plan for {task} task/goal...")

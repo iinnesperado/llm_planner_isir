@@ -12,6 +12,8 @@ from core.service_client import ServiceClient
 from core.interface.srv import LoadConfig
 from core.utils import class_from_classname
 
+from llm_planner.llm_planner_interfaces import GraspObject, ReleaseObject
+
 
 
 
@@ -52,16 +54,16 @@ class PickAndPlaceSim(Node):
         self.cbgroup_client=MutuallyExclusiveCallbackGroup()
 
         self.pick_object_service = self.create_service(
-            PickObject,
-            "simulator/pick_object",
-            self.pick_object_callback,
+            GraspObject,
+            "simulator/grasp_object",
+            self.grasp_object_callback,
             callback_group= self.cbgroup_server
         )
 
         self.place_object_service = self.create_service(
-            PlaceObject,
-            "simulator/pick_object",
-            self.place_object_callback,
+            ReleaseObject,
+            "simulator/release_object",
+            self.release_object_callback,
             callback_group= self.cbgroup_server
         )
         
@@ -162,8 +164,16 @@ class PickAndPlaceSim(Node):
         self.update_visible_objects()
         
         # self.object_to_pick = 
+
+    def grasp_object_callback(self, request, response):
+        """The callback policy to order to pick the designated object."""
+        obj_id = request.obj_id
+        subpart = request.subpart
+        success = self.grasp_object(obj_id, subpart)
+        response.success = success
+        return response
     
-    def pick_object_policy(self, obj_id, subpart):
+    def grasp_object(self, obj_id, subpart):
         """Grasp an object if it's visible at current location"""
         if obj_id in self.visible_objects:
             self.grasped_object = obj_id
@@ -183,7 +193,13 @@ class PickAndPlaceSim(Node):
             self.get_logger().error(f"Object {obj_id} is not on the table and thus cannot be picked.")
         return False
     
-    def place_object_policy(self, location):
+    def release_object_callback(self, request, response):
+        loc = request.location
+        success = self.release_object(loc)
+        response.success = success
+        return response 
+    
+    def release_object(self, location):
         """Place currently grasped object at location"""
         if self.grasped_object:
             self.objects[self.grasped_object]['location'] = location
@@ -256,7 +272,7 @@ class PickAndPlaceSim(Node):
         self.get_logger().info("Executing policy " + str(request.policy))
         self.get_logger().info(f"ITERATION: {self.iteration}")
 
-        self.random_object_to_pick()
+        # self.random_object_to_pick()
 
         self.get_logger().info(f"OBJECTS BEFORE POLICY: {self.objects}")
         self.get_logger().info(f"GRASPED OBJECT BEFORE: ({self.grasped_object}, {self.grasped_part})")

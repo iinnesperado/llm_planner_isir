@@ -1,0 +1,4 @@
+String obj_id
+String subpart
+---
+bool success
