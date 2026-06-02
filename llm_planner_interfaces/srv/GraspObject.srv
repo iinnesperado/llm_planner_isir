@@ -1,4 +1,4 @@
-String obj_id
-String subpart
+string obj_id
+string subpart
 ---
 bool success

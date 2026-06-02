@@ -11,12 +11,19 @@ class SemanticPerception(Perception):
         sensor = {}
         value = []
         if isinstance(self.reading.data, list):
-            if "objects" in self.name:
-                for perception in self.reading.data:
-                    value.append()
+            for perception in self.reading.data:
+                value.append(
+                    dict(
+                        name=perception.name, 
+                        subparts=perception.subparts, 
+                        location=perception.location
+                    )
+                )
+        else :
+            value.append(dict(data=self.reading.data))
 
         sensor[self.name] = value
-        self.get_logger().debug(f"Publishig semantic {self.name} = {sensor}")
+        self.get_logger().debug(f"Publishig semantic {self.name} = {str(sensor)}")
         sensor_msg = perception_dict_to_msg(sensor)
         self.publish_msg.perception = sensor_msg
         self.publish_msg.timestamp = self.get_clock().now().to_msg()

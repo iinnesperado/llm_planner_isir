@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'franka_llm_sim'
+package_name = 'llm_planner_simulator'
 
 setup(
     name=package_name,
@@ -13,14 +13,14 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='sergio',
-    maintainer_email='sergio.martinez3@udc.es',
+    maintainer='ines',
+    maintainer_email='ruizplovin@isir.upmc.fr',
     description='TODO: Package description',
     license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'franka_llm_simulator = franka_llm_sim.franka_simulator:main',
+            'llm_planner_simulator = llm_planner_simulator.pick_and_place_sim:main',
         ],
     },
 )
