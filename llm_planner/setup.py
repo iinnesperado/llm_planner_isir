@@ -14,14 +14,12 @@ setup(
     install_requires=['setuptools', 'pyyaml', 'numpy'],
     zip_safe=True,
     maintainer='ines',
-    maintainer_email='ines@example.com',
+    maintainer_email='ruizplovin@isir.upmc.fr',
     description='LLM-based planning with Expected Outcomes Framework for robotic manipulation tasks',
     license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'llm_simulation = llm_planner.simulation_node:main',
-            'policy_llm_planner = llm_planner.policy_llm_planner:main',
         ],
     },
 )

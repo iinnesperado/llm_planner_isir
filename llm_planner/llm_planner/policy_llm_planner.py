@@ -27,11 +27,12 @@ from cognitive_processes_interfaces.msg import ControlMsg
 from llm_planner.space import SemanticSpace
 from llm_planner.perception import SemanticPerception
 from llm_planner.llm_client import LLMClient # TODO check if the import is right for the ros thing
+from llm_planner_interfaces.srv import GetTargetObject
 
 # NOTE check if drive class should be defined 
 
 class PolicyLLMPlanner(Policy):
-    def __init__(self, name="policy_llm_planner", llm_model_name="llama3.2", ltm_id = None, **params):
+    def __init__(self, name="policy", llm_model_name="llama3.2", ltm_id = None, **params):
         super().__init__(name, **params)
         self.ltm_id = ltm_id
         self.policies = self.configure_policies()
@@ -46,7 +47,7 @@ class PolicyLLMPlanner(Policy):
         Requests data from the LTM.
         """        
         # Call get_node service from LTM
-        service_name = "/" + str(self.LTM_id) + "/get_node"
+        service_name = "/" + str(self.ltm_id) + "/get_node"
         request = ""
         client = ServiceClient(GetNodeFromLTM, service_name)
         ltm_response = client.send_request(name=request)
@@ -69,12 +70,12 @@ class PolicyLLMPlanner(Policy):
         """
         subscriber = self.create_subscription(
             PerceptionStamped, 
-            "perception/grasped_object/value", # TODO check if the name is correct for the service 
+            "/perception/grasped_object/value", # TODO check if the name is correct for the service 
             self.perception_callback, 
             1, 
             callback_group=self.cbgroup_perception
         )
-        data = SemanticPerception()
+        data = {}
         updated = False
         timestamp = Time()
         new_input = dict(subscriber=subscriber, data=data, updated=updated, timestamp=timestamp)
@@ -108,18 +109,22 @@ class PolicyLLMPlanner(Policy):
                 self.get_logger().error("LLM DID NOT RETURN A VALID POLICY. CHOOSING RANDOMLY...")
                 return
             
-            pnode_name = f"{name}_step_{idx}_pnode"
-            pnode_params = {}
-            if perception_dict["grasped_object"]:
-                pnode_params = {"space" : SemanticSpace(ident=f"{self.name} space", target_object=TODO, is_grasped=True)}
-            else:
-                pnode_params = {"space" : SemanticSpace(ident=f"{self.name} space", target_object=TODO, is_grasped=False)}
-            self.create_node_client(pnode_name, "cognitive_nodes.pnode.Pnode", pnode_params)
+            if self.perception['grasped_object']['updated']:
+                self.perception['grasped_object']['updated'] = False
+                
+                pnode_name = f"{name}_step_{idx}_pnode"
+                pnode_params = {}
+                target_object = self.get_pnode_target_object()
+                if perception_dict["grasped_object"]!="":
+                    pnode_params = {"target_object": target_object, "is_grasped": True}
+                else:
+                    pnode_params = {"target_object": target_object, "is_grasped": False}
+                self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPnode", pnode_params)
 
-            if policy['name'] not in self.node_clients :
-                self.node_clients[policy['name']] = ServiceClientAsync(self, Execute, f"policy/{policy['name']}/execute", callback_group=self.cbgroup_client)
-            self.get_logger().info(f"Executing plan step {idx}: {policy['name']}...")
-            await self.node_client[policy['name']].send_request_async(**policy['params'])
+                if policy['name'] not in self.node_clients :
+                    self.node_clients[policy['name']] = ServiceClientAsync(self, Execute, f"policy/{policy['name']}/execute", callback_group=self.cbgroup_client)
+                self.get_logger().info(f"Executing plan step {idx}: {policy['name']}...")
+                await self.node_clients[policy['name']].send_request_async(**policy['params'])
 
             cnode_name = f"{name}_step_{idx}_cnode"
             neighbors = [
@@ -181,7 +186,7 @@ class PolicyLLMPlanner(Policy):
     def delete_node_client(self, name):
         self.get_logged().info("Requesting node deletion")
         service_name = "commander/delete"
-        if service_name not in self.node_client:
+        if service_name not in self.node_clients:
             self.node_clients[service_name] = ServiceClient(DeleteNode, service_name)
         response = self.node_clients[service_name].send_request(name=name)
         return response.deleted
@@ -238,6 +243,32 @@ class PolicyLLMPlanner(Policy):
             self.get_logger().info(f"GOAL of the LLMPlanner : {goal}")
         
         return goal
+    
+    def get_pnode_target_object(self, pnode_name):
+        """
+        Retrieves the target_object from the pnode neighboor of the cnode calling this policy.
+        """
+        pnode_name = None
+        ltm_cache = self.request_ltm()
+        cnode_name = self.get_cnode_name()
+
+        if cnode_name is None:
+            self.get_logger().error("ERROR LLM Planner doesn't have a Cnode as neighbor")
+        else :
+            data = next((nodes_dict[cnode_name] for nodes_dict in ltm_cache.values() if cnode_name in nodes_dict))
+            neighbors = data['neighbors']
+
+            for node in neighbors:
+                if node['node_type'] == 'PNode':
+                    pnode_name = node['name']
+
+        self.get_logger().info("Requesting target object to PNode...")
+        service_name = "pnode/" + str(pnode_name) + "get_target_object"
+        if service_name not in self.node_clients:
+            self.node_clients[service_name] = ServiceClient(GetTargetObject, service_name)
+        response = self.node_clients[service_name].send_request()
+        return response.target_object
+
 
     def add_neighbor(self, node_name, neighbor_name):
         """
@@ -284,7 +315,7 @@ class PolicyLLMPlanner(Policy):
         This plan follows the Expected Outcomes Framework.
 
         :return: plan with each policy names to follow, they should be existing policies available in the LTM.
-        :rtype: dict    {1: {name: grasp_object, params: {obj_id: 'mug', subpart: 'body'}}, 2: ...}
+        :rtype: dict    {1: {name: grasp_object, params: {obj_id: 'mug', subparts: 'body'}}, 2: ...}
         """
 
         self.get_logger().info(f"Making plan for {task} task/goal...")

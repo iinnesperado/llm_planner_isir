@@ -9,10 +9,10 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rcl_interfaces.msg import ParameterDescriptor
 
 from core.service_client import ServiceClient
-from core.interface.srv import LoadConfig
+from core_interfaces.srv import LoadConfig
 from core.utils import class_from_classname
 
-from llm_planner.llm_planner_interfaces import GraspObject, ReleaseObject
+from llm_planner_interfaces.srv import GraspObject, ReleaseObject
 
 
 
@@ -67,7 +67,6 @@ class PickAndPlaceSim(Node):
             callback_group= self.cbgroup_server
         )
         
-        self.load_configuration()
         self.load_client=ServiceClient(LoadConfig, 'commander/load_experiment')
         self.get_logger().info("PickAndPlaceSim initialized")
     
@@ -112,8 +111,10 @@ class PickAndPlaceSim(Node):
             if "List" in classname:
                 self.perceptions[sid].data = []
                 self.base_messages[sid] = class_from_classname(classname.replace("List", ""))
+            elif "Float" in classname:
+                self.perceptions[sid].data = 0.0
             else:
-                self.perceptions[sid].data = False
+                self.perceptions[sid].data = ""
             self.get_logger().info("I will publish to... " + str(topic))
             self.sim_publishers[sid] = self.create_publisher(message, topic, 0)
     
@@ -147,7 +148,7 @@ class PickAndPlaceSim(Node):
     
     def setup_objects(self, objects):
         for obj in objects:
-            self.objects[obj['id']] = dict(subpart=obj['subpart'], location=obj['location'])
+            self.objects[obj['id']] = dict(subparts=obj['subparts'], location=obj['location'])
     
     def load_experiment_file_in_commander(self):
         """
@@ -159,11 +160,53 @@ class PickAndPlaceSim(Node):
         loaded = self.load_client.send_request(file = self.config_file)
         return loaded
     
-    def random_object_to_pick(self):
-        """Randomly select and object to pick from the available objects."""
-        self.update_visible_objects()
+    # def random_object_to_pick(self):
+    #     """Randomly select and object to pick from the available objects."""
+    #     self.update_visible_objects()
         
-        # self.object_to_pick = 
+    #     self.object_to_pick = 
+
+    def reward_progress_object_in_place(self):
+        """
+        Gives a larger reward the closer the robot is to the goal of putting the object in its rightful place.
+        If the object is placed right, the reward is 1.0.
+        """
+        progress = 0.0
+        if self.reward_object_in_place():
+            progress = 1.0
+        elif self.object_grasped():
+            progress = 0.5
+        elif self.check_object_pickable():
+            progress = 0.2
+        
+        self.perception['progress_object_in_place'].data = progress
+        self.get_logger().info(f"Progress: {progress}, Perception: {self.perceptions}")
+
+    def reward_object_in_place(self):
+        """
+        Reward for the object in the right place.
+        Returns True if there is reward, False if not.
+
+        Simple logic, the moment one object reaches its home location we get reward.
+        """
+        for object in self.perceptions['objects'].data:
+            if object['location'] == object['home']:
+                return True
+        return False
+    
+    def object_grasped(self):
+        """
+        Checks if object has been grasped.
+        """
+        if self.perceptions['grasped_object']!="":
+            return True
+        return False
+    
+    def check_object_pickable(self):
+        """
+        An object is pickable if it's visible. For the moment that means it is everything.
+        """
+        return True
 
     def grasp_object_callback(self, request, response):
         """The callback policy to order to pick the designated object."""
@@ -177,7 +220,7 @@ class PickAndPlaceSim(Node):
         """Grasp an object if it's visible at current location"""
         if obj_id in self.visible_objects:
             self.grasped_object = obj_id
-            if subpart in self.visible_objects[obj_id].get("subpart"):
+            if subpart in self.visible_objects[obj_id].get("subparts"):
                 self.grasped_part = subpart
             else:
                 self.get_logger().error(f"Subpart {subpart} is not defined for object {obj_id}.")
@@ -221,7 +264,7 @@ class PickAndPlaceSim(Node):
 
     def update_objects_location_in_perception(self):
         """Update location data on objects information."""
-        for object in self.perceptions["object"]:
+        for object in self.perceptions["objects"]:
             object.location = self.objects[object.id]
     
     def publish_perceptions(self):
@@ -295,6 +338,8 @@ class PickAndPlaceSim(Node):
 def main(args=None):
     rclpy.init(args=args)
     sim = PickAndPlaceSim()
+    sim.load_configuration()
+
     
     try:
         rclpy.spin(sim)

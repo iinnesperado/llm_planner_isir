@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'llm_planner_simulator = llm_planner_simulator.pick_and_place_sim:main',
+            'pick_and_place_simulator = llm_planner_simulator.pick_and_place_sim:main',
         ],
     },
 )

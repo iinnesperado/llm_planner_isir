@@ -12,7 +12,7 @@ class SemanticSpace(Space):
         - is_grasped makes reference if the Pnode is gonna be "table" or "grasper" type, as in it has the object on its hand or not
     """
     def __init__(self, target_object=None, is_grasped=False, **kwargs):
-        super.__init__(**kwargs)
+        super().__init__(**kwargs)
         # self.real_size = size
         self.size = 0
         self.target_object = target_object   # values : None or obj_id
