@@ -1,9 +1,9 @@
 from copy import deepcopy
 
-from cognitive_nodes.space import Space
+from cognitive_nodes.space import PointBasedSpace
 
 
-class SemanticSpace(Space):
+class SemanticSpace(PointBasedSpace):
     """
     Handles the state representation and learning part of the model, but we're mostly interested in the fact
     that this class is responsible of calculating the activation value.

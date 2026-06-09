@@ -36,9 +36,9 @@ class PickAndPlaceSim(Node):
     def __init__(self):
         super().__init__("PickAndPlaceSim")
         # self.rng = None
-        self.perceptions = {}
+        self.perceptions = {}           # dict {sensor1: {attr1: ..., attr2: ...}, sensor2: ...}
         self.base_messages = {}
-        self.sim_publishers = {}        # dict {sim_id: publisher}
+        self.sim_publishers = {}        # dict {sensor: publisher}
 
         self.random_seed = self.declare_parameter('random_seed', value = 0).get_parameter_value().integer_value
         self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
@@ -179,7 +179,7 @@ class PickAndPlaceSim(Node):
         elif self.check_object_pickable():
             progress = 0.2
         
-        self.perception['progress_object_in_place'].data = progress
+        self.perceptions['progress_object_in_place'].data = progress
         self.get_logger().info(f"Progress: {progress}, Perception: {self.perceptions}")
 
     def reward_object_in_place(self):
@@ -198,7 +198,7 @@ class PickAndPlaceSim(Node):
         """
         Checks if object has been grasped.
         """
-        if self.perceptions['grasped_object']!="":
+        if self.perceptions['grasped_object'].data!="":
             return True
         return False
     
@@ -228,7 +228,7 @@ class PickAndPlaceSim(Node):
             
             self.objects[obj_id]["location"] = "in_hand"
             self.visible_objects.pop(obj_id)  # Remove from visible
-            self.perceptions["grasped_object"].data = True
+            self.perceptions["grasped_object"].data = obj_id
 
             self.publish_perceptions()
             return True
@@ -264,7 +264,7 @@ class PickAndPlaceSim(Node):
 
     def update_objects_location_in_perception(self):
         """Update location data on objects information."""
-        for object in self.perceptions["objects"]:
+        for object in self.perceptions["objects"].data:
             object.location = self.objects[object.id]
     
     def publish_perceptions(self):

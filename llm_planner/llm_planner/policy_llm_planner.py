@@ -15,18 +15,19 @@ from cognitive_nodes.drive import Drive
 from cognitive_nodes.goal import Goal
 from cognitive_nodes.policy import Policy
 from core.service_client import ServiceClient, ServiceClientAsync
-from core.utils import actuation_dict_to_msg, perception_msg_to_dict, actuation_msg_to_dict, EncodableDecodableEnum
+# from core.utils import actuation_dict_to_msg, perception_msg_to_dict, actuation_msg_to_dict, EncodableDecodableEnum
 
 from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM, CreateNode, UpdateNeighbor, DeleteNode
 from cognitive_node_interfaces.srv import Execute, Predict
 from cognitive_node_interfaces.msg import Episode as EpisodeMsg
-from cognitive_node_interfaces.msg import PerceptionStamped
+from cognitive_node_interfaces.msg import Perception, PerceptionStamped
 from cognitive_processes_interfaces.msg import ControlMsg
 
 from llm_planner.space import SemanticSpace
 from llm_planner.perception import SemanticPerception
 from llm_planner.llm_client import LLMClient # TODO check if the import is right for the ros thing
+from llm_planner.utils import perception_msg_to_dict
 from llm_planner_interfaces.srv import GetTargetObject
 
 # NOTE check if drive class should be defined 
@@ -40,6 +41,7 @@ class PolicyLLMPlanner(Policy):
         self.llm_client = LLMClient(model_name=llm_model_name)
         self.prompt_dir = os.path.join(pathlib.Path(__file__).parent.resolve(), "prompts")
 
+        self.perception_sub = {}
         self.cofigure_perception()
         
     def request_ltm(self):
@@ -69,13 +71,13 @@ class PolicyLLMPlanner(Policy):
         Information used when creating the Pnodes.
         """
         subscriber = self.create_subscription(
-            PerceptionStamped, 
-            "/perception/grasped_object/value", # TODO check if the name is correct for the service 
+            String, 
+            "/simulator/sensor/grasped_object", # TODO check if the name is correct for the service 
             self.perception_callback, 
             1, 
-            callback_group=self.cbgroup_perception
+            callback_group=self.cbgroup_activation
         )
-        data = {}
+        data = ""
         updated = False
         timestamp = Time()
         new_input = dict(subscriber=subscriber, data=data, updated=updated, timestamp=timestamp)
@@ -109,23 +111,25 @@ class PolicyLLMPlanner(Policy):
                 self.get_logger().error("LLM DID NOT RETURN A VALID POLICY. CHOOSING RANDOMLY...")
                 return
             
-            if self.perception['grasped_object']['updated']:
-                self.perception['grasped_object']['updated'] = False
+            if self.perception_sub['grasped_object']['updated']:
+                self.perception_sub['grasped_object']['updated'] = False
                 
                 pnode_name = f"{name}_step_{idx}_pnode"
                 pnode_params = {}
                 target_object = self.get_pnode_target_object()
-                if perception_dict["grasped_object"]!="":
+                if self.perception_sub["grasped_object"]["data"]!="":
                     pnode_params = {"target_object": target_object, "is_grasped": True}
                 else:
                     pnode_params = {"target_object": target_object, "is_grasped": False}
                 self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPnode", pnode_params)
-
-                if policy['name'] not in self.node_clients :
-                    self.node_clients[policy['name']] = ServiceClientAsync(self, Execute, f"policy/{policy['name']}/execute", callback_group=self.cbgroup_client)
-                self.get_logger().info(f"Executing plan step {idx}: {policy['name']}...")
-                await self.node_clients[policy['name']].send_request_async(**policy['params'])
-
+            else :
+                self.get_logger().warning("LLMPlanner - perception was not updated thus PNode was not created!")
+            
+            if policy['name'] not in self.node_clients :
+                self.node_clients[policy['name']] = ServiceClientAsync(self, Execute, f"policy/{policy['name']}/execute", callback_group=self.cbgroup_client)
+            self.get_logger().info(f"Executing plan step {idx}: {policy['name']}...")
+            await self.node_clients[policy['name']].send_request_async(**policy['params'])
+            
             cnode_name = f"{name}_step_{idx}_cnode"
             neighbors = [
                 {"name": "PICK_AND_PLACE", "node_type": "WorldModel"},
@@ -140,8 +144,6 @@ class PolicyLLMPlanner(Policy):
                 self.get_logger().info(f"Successfully created the Cnode {cnode_name} and linked to policy {policy['name']}")
             else :
                 self.get_logger().error("ERROR Policy of the steps hasn't been linked to corresponding Cnode")
-
-            # TODO update perception for nect loop iteration
             
 
         response.policy = self.name # NOTE to decide if to leave like this (mainly bc i don't know if its used for something)
@@ -191,22 +193,18 @@ class PolicyLLMPlanner(Policy):
         response = self.node_clients[service_name].send_request(name=name)
         return response.deleted
     
-    def perception_callback(self, msg : PerceptionStamped):
+    def perception_callback(self, msg: String):
         """
         Callback method that reads a perception and stores it in perception_sub list. 
         This function should be called everytime the perception topic for 'grasped_object' publishes information. 
         """
-        perception_dict = self.perception_msg_to_dict(msg.perception)
-        if len(perception_dict)>1:
-            self.get_logger().error(f"{self.name} -- Received perception with multiple sensors: ({perception_dict.keys()}). Perception nodes should (currently) include only one sensor!")
-        if len(perception_dict)==1:
-            node_name = list(perception_dict.keys())[0]
-            if node_name in self.perception_sub:
-                self.perception_sub[node_name]['data'] = perception_dict[node_name]
-                self.perception_sub[node_name]['updated'] = True
-                self.perception_sub[node_name]['timestamp'] = Time.from_msg(msg.timestamp)
+        perception = msg.data
+        if perception != "":
+            self.perception_sub['grasped_object']['data'] = perception
+            self.perception_sub['grasped_object']['updated'] = True
+            self.perception_sub['grasped_object']['timestamp'] = Time.from_msg(msg.timestamp)
         else :
-            self.get_logger().warn("Empty perception received in Policy LLM Planner. No update in the perceptions.")
+            self.get_logger().warning("Empty perception received in Policy LLM Planner. No update in the perceptions.")
 
     def get_cnode_name(self):
         """
