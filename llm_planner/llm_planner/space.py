@@ -18,21 +18,6 @@ class SemanticSpace(PointBasedSpace):
         self.target_object = target_object   # values : None or obj_id
         self. is_grasped = is_grasped    # bool 
 
-    # def add_point(self, perception, confidence):
-    #     """
-    #     Based on the perception we setup the variables target_object and is_grasped.
-    #     Not gonna use the idea of the points since is not likely to be used by our context.
-
-    #     :param perception: A given perception to add
-    #     :type perception: dicts
-    #     """
-    #     if perception["grasped_object"] is not None:
-    #         self.target_object = perception["grasped_object"]
-    #         self.is_grasped = True
-    #     else:
-    #         self.is_grasped = False
-
-
     def get_probability(self, perception):
         """
         Reponsible to calculate the actiation value for later.

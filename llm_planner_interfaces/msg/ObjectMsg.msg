@@ -1,3 +1,3 @@
 string name
-string subparts
+string[] subparts
 string location

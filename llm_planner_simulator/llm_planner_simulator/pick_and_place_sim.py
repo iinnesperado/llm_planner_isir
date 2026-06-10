@@ -115,8 +115,10 @@ class PickAndPlaceSim(Node):
                 self.perceptions[sid].data = 0.0
             else:
                 self.perceptions[sid].data = ""
-            self.get_logger().info("I will publish to... " + str(topic))
+            self.get_logger().info("I will publish " + str(sid) + " to... " + str(topic))
             self.sim_publishers[sid] = self.create_publisher(message, topic, 0)
+        
+        self.get_logger().debug(f"Setup perceptions finished : {self.perceptions}")
     
     def setup_control_channel(self, simulation):
         """
@@ -149,6 +151,14 @@ class PickAndPlaceSim(Node):
     def setup_objects(self, objects):
         for obj in objects:
             self.objects[obj['id']] = dict(subparts=obj['subparts'], location=obj['location'])
+            
+            data = self.base_messages["objects"]()
+            data.name = obj["id"]
+            data.subparts = deepcopy(obj["subparts"])
+            data.location = obj["location"]
+            self.perceptions["objects"].data.append(data)
+
+        self.get_logger().debug(f"Object list setup finished : {self.objects} and {self.perceptions}")
     
     def load_experiment_file_in_commander(self):
         """
@@ -264,8 +274,8 @@ class PickAndPlaceSim(Node):
 
     def update_objects_location_in_perception(self):
         """Update location data on objects information."""
-        for object in self.perceptions["objects"].data:
-            object.location = self.objects[object.id]
+        for obj in self.perceptions["objects"].data:
+            obj.location = self.objects[obj.name]["location"]
     
     def publish_perceptions(self):
         """
@@ -273,7 +283,7 @@ class PickAndPlaceSim(Node):
         """
         self.update_objects_location_in_perception()
         for ident, publisher in self.sim_publishers.items():
-            self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
+            self.get_logger().info("Publishing " + ident + " = " + str(self.perceptions[ident].data))
             publisher.publish(self.perceptions[ident])
 
     def world_reset_service_callback(self, request, response):

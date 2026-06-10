@@ -126,7 +126,8 @@ class PolicyLLMPlanner(Policy):
                 self.get_logger().warning("LLMPlanner - perception was not updated thus PNode was not created!")
             
             if policy['name'] not in self.node_clients :
-                self.node_clients[policy['name']] = ServiceClientAsync(self, Execute, f"policy/{policy['name']}/execute", callback_group=self.cbgroup_client)
+                # TODO the ServiceClient def is worng as it doesnt match the needed parameters for the personlised policy services
+                self.node_clients[policy['name']] = ServiceClientAsync(self, policy["service_msg"], policy['topic'], callback_group=self.cbgroup_client)
             self.get_logger().info(f"Executing plan step {idx}: {policy['name']}...")
             await self.node_clients[policy['name']].send_request_async(**policy['params'])
             
@@ -204,7 +205,7 @@ class PolicyLLMPlanner(Policy):
             self.perception_sub['grasped_object']['updated'] = True
             self.perception_sub['grasped_object']['timestamp'] = Time.from_msg(msg.timestamp)
         else :
-            self.get_logger().warning("Empty perception received in Policy LLM Planner. No update in the perceptions.")
+            self.get_logger().warning(f"Empty perception received in Policy LLM Planner. No update in the perceptions. {perception}")
 
     def get_cnode_name(self):
         """
