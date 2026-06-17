@@ -182,9 +182,9 @@ class PickAndPlaceSim(Node):
         If the object is placed right, the reward is 1.0.
         """
         progress = 0.0
-        if self.reward_object_in_place():
+        if self.check_object_in_place():
             progress = 1.0
-        elif self.object_grasped():
+        elif self.check_object_grasped():
             progress = 0.5
         elif self.check_object_pickable():
             progress = 0.2
@@ -192,9 +192,9 @@ class PickAndPlaceSim(Node):
         self.perceptions['progress_object_in_place'].data = progress
         self.get_logger().info(f"Progress: {progress}, Perception: {self.perceptions}")
 
-    def reward_object_in_place(self):
+    def check_object_in_place(self):
         """
-        Reward for the object in the right place.
+        Checks if the object is its home location.
         Returns True if there is reward, False if not.
 
         Simple logic, the moment one object reaches its home location we get reward.
@@ -204,7 +204,7 @@ class PickAndPlaceSim(Node):
                 return True
         return False
     
-    def object_grasped(self):
+    def check_object_grasped(self):
         """
         Checks if object has been grasped.
         """
@@ -276,6 +276,13 @@ class PickAndPlaceSim(Node):
         """Update location data on objects information."""
         for obj in self.perceptions["objects"].data:
             obj.location = self.objects[obj.name]["location"]
+
+    def update_reward_sensor(self):
+        """Update goal sensors' values."""
+        for sensor in self.perceptions:
+            reward_method = getattr(self, "reward_" + sensor, None)
+            if callable(reward_method):
+                reward_method()
     
     def publish_perceptions(self):
         """
@@ -295,6 +302,8 @@ class PickAndPlaceSim(Node):
         self.reset_perceptions()
         self.update_visible_objects()
         self.publish_perceptions()
+        response.success = True
+        return response
     
     def reset_perceptions(self):
         """
