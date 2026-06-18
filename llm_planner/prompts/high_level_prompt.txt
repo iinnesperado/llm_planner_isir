@@ -1,4 +1,4 @@
 You are in charge of a fixed robotic arm ending in a gripper. Your task is the following: {task}
 Please output an plan, composed of a grasp action and a place action, to carry out this task. You can assume that simple actions (such as grasping or handing objects) automatically move the arm to the correct position, so you should avoid actions such as 'move to...'.
 
-Please only output the plan as a tuple of strings, where each step is a string, without any other text.
+Please only output the plan as a tuple of strings, where each step is a string. And output no other text.

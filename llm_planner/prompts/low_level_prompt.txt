@@ -8,16 +8,23 @@ Here are the functions and skills, with examples of the syntax:
 grasp_object(object, subpart)
 	"""Grasp the specified object at a specific subpart. The possible combination are:
 	- object: 'mug', subpart: 'handle', 'body'
-	- object: 'philipps_screwdriver', subpart: 'handle', 'shaft'
+	- object: 'screwdriver', subpart: 'handle', 'shaft'
 	- object: 'scissors', subpart: 'handle', 'blade'
 	- object: 'banana', subpart: 'body'"""
 example: grasp_object('mug', 'handle')
 
-handover(direction)
-	"""go to the pose for handing over an object to a human and open gripper, the direction is the direction of the human with respect to the robot, possible values are:
-	- direction: 'left', 'right', 'front' """
-example: handover('right')
+release_object(location)
+	"""go to the pose for releasing an object in the specified location, possible values are:
+	- location: 'table', 'trash', 'toolbox', 'shelf' """
+example: release_object('table')
 
+Associated to this skills there is a service and topic as follows:
+grasp_object(object, subpart) :
+	- service : GraspObject
+	- topic : /simulator/grasp_object
+release_object(location) :
+	- service : ReleaseObject
+	- topic : /simulator/release_object
 
 The task and the plan:
 You are in charge of executing the following task: {task}. The plan is: {plan}
@@ -25,4 +32,4 @@ Here are the expected outcomes of each step in the plan, which you can use as a 
 {EO}
 
 What I need you to do:
-Please output code, which will contain mostly action primitives to solve the steps of the plan one by one. Please output python code, enclosed between the tags <robot_code> and </robot_code>. Please only use the functions I defined above and ensure the locations and objects that you pass as arguments are correct.
+Please output a python-style list, which will contain the necessary associated skill for each step of the plan. Each item of the list will be a python-style dictionary, where the keys will be ’name’ (name of the skill used), ‘params’ (parameters needed for the skill), 'service' and 'topic' (corresponds to the associated service and topic described above). For example the skill grasp_object(’mug’, ‘handle’) will be in the following form {name: ‘grasp_object’, params: {object: ‘mug’, subpart: ‘handle’}, service: 'GraspObject', topic: '/simulator/grasp_object'}. Return only the list and output no other text.
