@@ -20,10 +20,10 @@ example: release_object('table')
 
 Associated to this skills there is a service and topic as follows:
 grasp_object(object, subpart) :
-	- service : GraspObject
+	- service : llm_planner_interfaces.srv.GraspObject
 	- topic : /simulator/grasp_object
 release_object(location) :
-	- service : ReleaseObject
+	- service : llm_planner_interfaces.srv.ReleaseObject
 	- topic : /simulator/release_object
 
 The task and the plan:
@@ -32,4 +32,4 @@ Here are the expected outcomes of each step in the plan, which you can use as a 
 {EO}
 
 What I need you to do:
-Please output a python-style list, which will contain the necessary associated skill for each step of the plan. Each item of the list will be a python-style dictionary, where the keys will be ’name’ (name of the skill used), ‘params’ (parameters needed for the skill), 'service' and 'topic' (corresponds to the associated service and topic described above). For example the skill grasp_object(’mug’, ‘handle’) will be in the following form {name: ‘grasp_object’, params: {object: ‘mug’, subpart: ‘handle’}, service: 'GraspObject', topic: '/simulator/grasp_object'}. Return only the list and output no other text.
+Please output a python-style list, which will contain the necessary associated skill for each step of the plan. Each item of the list will be a python-style dictionary, where the keys will be ’name’ (name of the skill used), ‘params’ (parameters needed for the skill), 'service' and 'topic' (corresponds to the associated service and topic described above). For example the skill grasp_object(’mug’, ‘handle’) will be in the following form {name: ‘grasp_object’, params: {object: ‘mug’, subpart: ‘handle’}, service: GraspObject, topic: '/simulator/grasp_object'}. Return only the list and output no other text.

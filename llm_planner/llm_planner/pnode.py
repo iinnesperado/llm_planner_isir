@@ -50,7 +50,7 @@ class SemanticPNode(PNode):
     
     def read_activation_callback(self, msg : PerceptionStamped):
         perception_dict = perception_msg_to_dict(msg=msg.perception)
-        self.get_logger().debug(f"Reading perception ... {perception_dict}")
+        self.get_logger().debug(f"Reading perception ...")
 
         if len(perception_dict)>1:
             self.get_logger().error(f'{self.name} -- Received perception with multiple sensors: ({perception_dict.keys()}). Perception nodes should (currently) include only one sensor!')

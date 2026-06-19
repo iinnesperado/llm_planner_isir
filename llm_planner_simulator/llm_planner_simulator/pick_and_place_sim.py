@@ -150,7 +150,7 @@ class PickAndPlaceSim(Node):
     
     def setup_objects(self, objects):
         for obj in objects:
-            self.objects[obj['id']] = dict(subparts=obj['subparts'], location=obj['location'])
+            self.objects[obj['id']] = dict(subparts=obj['subparts'], location=obj['location'], home=obj['home'])
             
             data = self.base_messages["objects"]()
             data.name = obj["id"]
@@ -199,8 +199,8 @@ class PickAndPlaceSim(Node):
 
         Simple logic, the moment one object reaches its home location we get reward.
         """
-        for object in self.perceptions['objects'].data:
-            if object['location'] == object['home']:
+        for _, obj_data in self.objects.items():
+            if obj_data['location'] == obj_data['home']:
                 return True
         return False
     
@@ -208,9 +208,12 @@ class PickAndPlaceSim(Node):
         """
         Checks if object has been grasped.
         """
-        if self.perceptions['grasped_object'].data!="":
-            return True
-        return False
+        if self.perceptions['grasped_object'].data=="None":
+            return False
+        elif self.perceptions['grasped_object'].data=="":
+            self.get_logger().warn("Checking perception for 'grasped_object' returns empty !")
+            return False
+        return True
     
     def check_object_pickable(self):
         """
@@ -259,7 +262,7 @@ class PickAndPlaceSim(Node):
             
             self.grasped_object = None
             self.grasped_part = None
-            self.perceptions["grasped_object"].data = False
+            self.perceptions["grasped_object"].data = "None"
 
             self.publish_perceptions()
             return True
@@ -288,12 +291,15 @@ class PickAndPlaceSim(Node):
         """
         Publish the current perceptions to the corresponding topics.
         """
+        self.perceptions['grasped_object'].data = self.grasped_object or "None"
         self.update_objects_location_in_perception()
+
         for ident, publisher in self.sim_publishers.items():
-            self.get_logger().info("Publishing " + ident + " = " + str(self.perceptions[ident].data))
+            self.get_logger().debug("Publishing " + ident + " = " + str(self.perceptions[ident].data))
             publisher.publish(self.perceptions[ident])
 
-    def world_reset_service_callback(self, request, response):
+    def reset_world(self, data):
+        self.get_logger().info(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
         # Reset robot to inital state
         self.grasped_object = None
         self.grasped_part = None
@@ -302,12 +308,16 @@ class PickAndPlaceSim(Node):
         self.reset_perceptions()
         self.update_visible_objects()
         self.publish_perceptions()
+        self.get_logger().info(f"DEBUG: WORLD RESET NEW: {self.perceptions}")
+
+    def world_reset_service_callback(self, request, response):
+        self.reset_world(request)
         response.success = True
         return response
     
     def reset_perceptions(self):
         """
-        Puts all the objects on top of the table.
+        Puts all the objects on top of the table. Releases object from gripper
         We consider the location 'table' to be the init location of all objects.
         """
         for _,obj_data in self.objects.items():

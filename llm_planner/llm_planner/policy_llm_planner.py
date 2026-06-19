@@ -15,7 +15,7 @@ from cognitive_nodes.drive import Drive
 from cognitive_nodes.goal import Goal
 from cognitive_nodes.policy import Policy
 from core.service_client import ServiceClient, ServiceClientAsync
-# from core.utils import actuation_dict_to_msg, perception_msg_to_dict, actuation_msg_to_dict, EncodableDecodableEnum
+from core.utils import class_from_classname
 
 from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM, CreateNode, UpdateNeighbor, DeleteNode
@@ -79,8 +79,7 @@ class PolicyLLMPlanner(Policy):
         )
         data = ""
         updated = False
-        timestamp = Time()
-        new_input = dict(subscriber=subscriber, data=data, updated=updated, timestamp=timestamp)
+        new_input = dict(subscriber=subscriber, data=data, updated=updated)
         self.perception_sub["grasped_object"] = new_input
         self.get_logger().info(f"{self.name} -- Subscribed to 'grasped_object' perception topic")
     
@@ -93,6 +92,7 @@ class PolicyLLMPlanner(Policy):
         :type response: cognitive_node_interfaces.srv.Execute.Response
         :raise NotImplementedError: This method should be implemented in subclasses.
         """
+        self.get_logger().info(f"== START LLM PLANNER CALLBACK EXECUTE ==")
 
         perception_dict = perception_msg_to_dict(request.perception)
         self.get_logger().info(f"Reveived perception: {perception_dict}")
@@ -117,17 +117,16 @@ class PolicyLLMPlanner(Policy):
                 pnode_name = f"{name}_step_{idx}_pnode"
                 pnode_params = {}
                 target_object = self.get_pnode_target_object()
-                if self.perception_sub["grasped_object"]["data"]!="":
-                    pnode_params = {"target_object": target_object, "is_grasped": True}
-                else:
+                if self.perception_sub["grasped_object"]["data"]=="None":
                     pnode_params = {"target_object": target_object, "is_grasped": False}
+                elif self.perception_sub["graped_object"]["data"]!="":
+                    pnode_params = {"target_object": target_object, "is_grasped": True}
                 self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPnode", pnode_params)
             else :
                 self.get_logger().warning("LLMPlanner - perception was not updated thus PNode was not created!")
             
             if policy['name'] not in self.node_clients :
-                # TODO the ServiceClient def is worng as it doesnt match the needed parameters for the personlised policy services
-                self.node_clients[policy['name']] = ServiceClientAsync(self, policy["service_msg"], policy['topic'], callback_group=self.cbgroup_client)
+                self.node_clients[policy['name']] = ServiceClientAsync(self, class_from_classname(policy["service"]), policy['topic'], callback_group=self.cbgroup_client)
             self.get_logger().info(f"Executing plan step {idx}: {policy['name']}...")
             await self.node_clients[policy['name']].send_request_async(**policy['params'])
             
@@ -203,9 +202,8 @@ class PolicyLLMPlanner(Policy):
         if perception != "":
             self.perception_sub['grasped_object']['data'] = perception
             self.perception_sub['grasped_object']['updated'] = True
-            self.perception_sub['grasped_object']['timestamp'] = Time.from_msg(msg.timestamp)
         else :
-            self.get_logger().warning(f"Empty perception received in Policy LLM Planner. No update in the perceptions. {perception}")
+            self.get_logger().warning(f"Empty perception received in Policy LLM Planner. No update in the perceptions.")
 
     def get_cnode_name(self):
         """
