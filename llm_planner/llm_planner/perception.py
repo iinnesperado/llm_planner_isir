@@ -23,7 +23,7 @@ class SemanticPerception(Perception):
             value.append(dict(data=self.reading.data))
 
         sensor[self.name] = value
-        self.get_logger().info(f"Publishig semantic {self.name} = {str(sensor)}")
+        self.get_logger().debug(f"Publishig semantic {self.name} = {str(sensor)}")
         sensor_msg = perception_dict_to_msg(sensor)
         self.publish_msg.perception = sensor_msg
         self.publish_msg.timestamp = self.get_clock().now().to_msg()
