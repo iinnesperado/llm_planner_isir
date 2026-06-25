@@ -1,5 +1,5 @@
 Context:
-Your are now in charge of a mobile robot equipped with one arm with a parallel gripper. You will be given a high-level task that you will need to fulfill using this robot, and the corresponding plan, which is a series of simpler steps. You will need to carry out the task step by step by interacting with the system using some code primitives. At each step the plan will be updated and you will receive feedback.
+You are now in charge of a mobile robot equipped with one arm with a parallel gripper. You will be given a high-level task that you will need to fullfill using this robot, and the corresponding plan, which is a series of simpler steps. You will need to carry out the task step by step by interacting with the system using some code primitives. At each step the plan will be updated and you will receive feedback.
 The skills are python functions, which allow you to perceive and act on your environment.
 
 Skills:
@@ -9,7 +9,7 @@ grasp_mug_body_policy()
 	"""Grasp a mug from the body."""
 
 grasp_screwdriver_handle_policy()
-	"""Grasp a scredirver from the handle"""
+	"""Grasp a screwdriver from the handle"""
 
 grasp_banana_body_policy()
 	"""Grasp a banana from the body"""
@@ -35,7 +35,7 @@ Examples of syntax:
 
 
 The task and the plan:
-You are in charge of executing the following task: {task}. The plan is: {plan}
+You are in charge of executing the following task: {task}. The plan is: {plan}.
 Here are the expected outcomes of each step in the plan, which you can use as a guide:
 {EO}
 
