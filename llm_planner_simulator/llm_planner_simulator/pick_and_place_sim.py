@@ -190,7 +190,7 @@ class PickAndPlaceSim(Node):
             progress = 0.2
         
         self.perceptions['progress_object_in_place'].data = progress
-        self.get_logger().info(f"Progress: {progress}, Perception: {self.perceptions}")
+        # self.get_logger().info(f"Progress: {progress}, Perception: {self.perceptions}")
 
     def check_object_in_place(self):
         """
