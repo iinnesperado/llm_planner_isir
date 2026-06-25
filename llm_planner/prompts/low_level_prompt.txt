@@ -5,26 +5,34 @@ The skills are python functions, which allow you to perceive and act on your env
 Skills:
 Here are the functions and skills, with examples of the syntax:
 
-grasp_object(object, subpart)
-	"""Grasp the specified object at a specific subpart. The possible combination are:
-	- object: 'mug', subpart: 'handle', 'body'
-	- object: 'screwdriver', subpart: 'handle', 'shaft'
-	- object: 'scissors', subpart: 'handle', 'blade'
-	- object: 'banana', subpart: 'body'"""
-example: grasp_object('mug', 'handle')
+grasp_mug_body_policy()
+	"""Grasp a mug from the body."""
 
-release_object(location)
-	"""go to the pose for releasing an object in the specified location, possible values are:
-	- location: 'table', 'trash', 'toolbox', 'shelf' """
-example: release_object('table')
+grasp_screwdriver_handle_policy()
+	"""Grasp a scredirver from the handle"""
 
-Associated to this skills there is a service and topic as follows:
-grasp_object(object, subpart) :
-	- service : llm_planner_interfaces.srv.GraspObject
-	- topic : /simulator/grasp_object
-release_object(location) :
-	- service : llm_planner_interfaces.srv.ReleaseObject
-	- topic : /simulator/release_object
+grasp_banana_body_policy()
+	"""Grasp a banana from the body"""
+
+grasp_scissors_handle_policy()
+	"""Grasp scissors from the handle"""
+
+release_on_table_policy()
+	"""Go to the pose for releasing an object in location = table"""
+
+release_in_trash_policy()
+	"""Go to the pose for releasing an object in location = trash"""
+
+release_on_shelf_policy()
+	"""Go to the pose for releasing an object in location = shelf"""
+
+release_in_toolbox_policy()
+	"""Go to the pose for releasing an object in location = toolbox"""
+
+Examples of syntax: 
+	- grasp_scissors_handle_policy()
+	- release_on_shelf_policy()
+
 
 The task and the plan:
 You are in charge of executing the following task: {task}. The plan is: {plan}
@@ -32,4 +40,4 @@ Here are the expected outcomes of each step in the plan, which you can use as a 
 {EO}
 
 What I need you to do:
-Please output a python-style list, which will contain the necessary associated skill for each step of the plan. Each item of the list will be a python-style dictionary, where the keys will be ’name’ (name of the skill used), ‘params’ (parameters needed for the skill), 'service' and 'topic' (corresponds to the associated service and topic described above). For example the skill grasp_object(’mug’, ‘handle’) will be in the following form {name: ‘grasp_object’, params: {object: ‘mug’, subpart: ‘handle’}, service: GraspObject, topic: '/simulator/grasp_object'}. Return only the list and output no other text.
+Please output a python-style list, which will contain the necessary associated skill for each step of the plan. Each item of the list will be a string corresponding one of the available skills. Return only the list and output no other text.
