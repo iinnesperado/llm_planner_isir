@@ -37,16 +37,29 @@ class SemanticPNode(PNode):
         return response
     
     def calculate_activation(self, perception=None, activation_list=None):
-        if perception is None:
-            return 0.0
-        
-        space = self.get_space(perception)
-        if space is None:
-            return 0.0
-        
-        activation = space.get_probability(perception)
+        """ 
+        Calculate activation.
 
-        return activation
+        :param perception: all the information about the perception 
+        :type perception: dict
+        """
+        if activation_list:
+            perception = {}
+            for sensor in activation_list:
+                activation_list[sensor]["updated"] = False
+                perception[sensor] = activation_list[sensor]["data"]
+        
+        if perception:
+            space = self.spaces[0]
+            if space:
+                activation_value = max(0.0, space.get_probability(perception))
+            else : 
+                activation_value = 0.0
+        
+            self.activation.activation = activation_value
+            self.activation.timestamp = self.get_clock().now().to_msg()
+
+        return self.activation
     
     def read_activation_callback(self, msg : PerceptionStamped):
         perception_dict = perception_msg_to_dict(msg=msg.perception)
