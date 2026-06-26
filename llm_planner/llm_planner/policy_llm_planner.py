@@ -105,13 +105,15 @@ class PolicyLLMPlanner(Policy):
         name = re.sub(r"_goal", "", goal)
 
         for idx, policy in plan.enumerate(): 
-            self.get_logger().info(f"Executing plan step {idx}: {policy}...")
+            self.get_logger().info(f"Working on plan step {idx}: {policy}...")
 
-            if policy['name'] not in self.policies:
+            if policy not in self.policies:
                 self.get_logger().error("LLM DID NOT RETURN A VALID POLICY. CHOOSING RANDOMLY...")
                 return
             
             if self.perception_sub['grasped_object']['updated']:
+                self.get_logger().info("Creating PNode...")
+
                 self.perception_sub['grasped_object']['updated'] = False
                 
                 pnode_name = f"{name}_step_{idx}_pnode"
@@ -125,10 +127,10 @@ class PolicyLLMPlanner(Policy):
             else :
                 self.get_logger().warning("LLMPlanner - perception was not updated thus PNode was not created!")
             
-            if policy['name'] not in self.node_clients :
-                self.node_clients[policy['name']] = ServiceClientAsync(self, class_from_classname(policy["service"]), policy['topic'], callback_group=self.cbgroup_client)
-            self.get_logger().info(f"Executing plan step {idx}: {policy['name']}...")
-            await self.node_clients[policy['name']].send_request_async(**policy['params'])
+            # if policy not in self.node_clients :
+            #     self.node_clients[policy] = ServiceClientAsync(Policy, '/simulator/executed_policy', callback_group=self.cbgroup_client)
+            self.get_logger().info(f"Executing plan step {idx}: {policy}...")
+            await self.node_clients[policy].send_request_async(policy=policy)
             
             cnode_name = f"{name}_step_{idx}_cnode"
             neighbors = [
@@ -139,15 +141,16 @@ class PolicyLLMPlanner(Policy):
             cnode_params = {"neighbors": neighbors}
             self.create_node_client(cnode_name, "cognitive_nodes.cnode.CNode", cnode_params)
 
-            sucess = self.add_neighbor(policy['name'], cnode_name)
+            sucess = self.add_neighbor(policy, cnode_name)
             if sucess:
-                self.get_logger().info(f"Successfully created the Cnode {cnode_name} and linked to policy {policy['name']}")
+                self.get_logger().info(f"Successfully added the Cnode {cnode_name} as neighbor to policy {policy}")
             else :
-                self.get_logger().error("ERROR Policy of the steps hasn't been linked to corresponding Cnode")
+                self.get_logger().error(f"ERROR Policy of the step {idx} hasn't been linked to corresponding Cnode {cnode_name}")
             
 
-        response.policy = self.name # NOTE to decide if to leave like this (mainly bc i don't know if its used for something)
+        response.policy = self.name 
 
+        #NOTE TO REVISE WITH THE NEW DUMMY NODES NETWORK
         self.delete_cnode_llm_planner()
         self.delete_neighbor(self.name, self.get_cnode_name())
 
@@ -159,6 +162,9 @@ class PolicyLLMPlanner(Policy):
         """Responsible of deleting the cnode that is responsible of the call for the llm planner the whole plan has been executed."""
         cnode = self.get_cnode_name()
         deleted = self.delete_node_client(cnode)
+
+        self.get_logger().info(f"Deletation of cnode llm_planner was successful: {deleted}")
+
         return deleted
     
     def create_node_client(self, name, class_name, parameters={}):
@@ -175,7 +181,7 @@ class PolicyLLMPlanner(Policy):
         :rtype: bool
         """
 
-        self.get_logger().info("Requesting node creation")
+        self.get_logger().info("Requesting node creation...")
         params_str = yaml.dump(parameters, sort_keys=False)
         service_name = "commander/create"
         if service_name not in self.node_clients:
@@ -183,6 +189,9 @@ class PolicyLLMPlanner(Policy):
         response = self.node_clients[service_name].send_request(
             name=name, class_name=class_name, parameters=params_str
         )
+
+        self.get_logger().info(f"Creation of node {name} was successful: {response.created}.")
+
         return response.created
     
     def delete_node_client(self, name):
@@ -312,7 +321,7 @@ class PolicyLLMPlanner(Policy):
         This plan follows the Expected Outcomes Framework.
 
         :return: plan with each policy names to follow, they should be existing policies available in the LTM.
-        :rtype: dict    {1: {name: grasp_object, params: {obj_id: 'mug', subparts: 'body'}}, 2: ...}
+        :rtype: list[str]        ['prim1', 'prim2', ...]
         """
 
         self.get_logger().info(f"Making plan for {task} task/goal...")
