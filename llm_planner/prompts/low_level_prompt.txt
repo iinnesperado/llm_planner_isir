@@ -1,28 +1,43 @@
 Context:
-Your are now in charge of a mobile robot equipped with one arm with a parallel gripper. You will be given a high-level task that you will need to fulfill using this robot, and the corresponding plan, which is a series of simpler steps. You will need to carry out the task step by step by interacting with the system using some code primitives. At each step the plan will be updated and you will receive feedback.
+You are now in charge of a mobile robot equipped with one arm with a parallel gripper. You will be given a high-level task that you will need to fullfill using this robot, and the corresponding plan, which is a series of simpler steps. You will need to carry out the task step by step by interacting with the system using some code primitives. At each step the plan will be updated and you will receive feedback.
 The skills are python functions, which allow you to perceive and act on your environment.
 
 Skills:
 Here are the functions and skills, with examples of the syntax:
 
-grasp_object(object, subpart)
-	"""Grasp the specified object at a specific subpart. The possible combination are:
-	- object: 'mug', subpart: 'handle', 'body'
-	- object: 'philipps_screwdriver', subpart: 'handle', 'shaft'
-	- object: 'scissors', subpart: 'handle', 'blade'
-	- object: 'banana', subpart: 'body'"""
-example: grasp_object('mug', 'handle')
+grasp_mug_body_policy()
+	"""Grasp a mug from the body."""
 
-handover(direction)
-	"""go to the pose for handing over an object to a human and open gripper, the direction is the direction of the human with respect to the robot, possible values are:
-	- direction: 'left', 'right', 'front' """
-example: handover('right')
+grasp_screwdriver_handle_policy()
+	"""Grasp a screwdriver from the handle"""
+
+grasp_banana_body_policy()
+	"""Grasp a banana from the body"""
+
+grasp_scissors_handle_policy()
+	"""Grasp scissors from the handle"""
+
+release_on_table_policy()
+	"""Go to the pose for releasing an object in location = table"""
+
+release_in_trash_policy()
+	"""Go to the pose for releasing an object in location = trash"""
+
+release_on_shelf_policy()
+	"""Go to the pose for releasing an object in location = shelf"""
+
+release_in_toolbox_policy()
+	"""Go to the pose for releasing an object in location = toolbox"""
+
+Examples of syntax: 
+	- grasp_scissors_handle_policy()
+	- release_on_shelf_policy()
 
 
 The task and the plan:
-You are in charge of executing the following task: {task}. The plan is: {plan}
+You are in charge of executing the following task: {task}. The plan is: {plan}.
 Here are the expected outcomes of each step in the plan, which you can use as a guide:
 {EO}
 
 What I need you to do:
-Please output code, which will contain mostly action primitives to solve the steps of the plan one by one. Please output python code, enclosed between the tags <robot_code> and </robot_code>. Please only use the functions I defined above and ensure the locations and objects that you pass as arguments are correct.
+Please output a python-style list, which will contain the necessary associated skill for each step of the plan. Each item of the list will be a string corresponding one of the available skills. Return only the list and output no other text.
