@@ -52,20 +52,6 @@ class PickAndPlaceSim(Node):
         # Callback groups for concurrency
         self.cbgroup_server=MutuallyExclusiveCallbackGroup()
         self.cbgroup_client=MutuallyExclusiveCallbackGroup()
-
-        self.pick_object_service = self.create_service(
-            GraspObject,
-            "simulator/grasp_object",
-            self.grasp_object_callback,
-            callback_group= self.cbgroup_server
-        )
-
-        self.place_object_service = self.create_service(
-            ReleaseObject,
-            "simulator/release_object",
-            self.release_object_callback,
-            callback_group= self.cbgroup_server
-        )
         
         self.load_client=ServiceClient(LoadConfig, 'commander/load_experiment')
         self.get_logger().info("PickAndPlaceSim initialized")
@@ -169,12 +155,6 @@ class PickAndPlaceSim(Node):
         """
         loaded = self.load_client.send_request(file = self.config_file)
         return loaded
-    
-    # def random_object_to_pick(self):
-    #     """Randomly select and object to pick from the available objects."""
-    #     self.update_visible_objects()
-        
-    #     self.object_to_pick = 
 
     def reward_progress_object_in_place(self):
         """
@@ -221,13 +201,17 @@ class PickAndPlaceSim(Node):
         """
         return True
 
-    def grasp_object_callback(self, request, response):
-        """The callback policy to order to pick the designated object."""
-        obj_id = request.obj_id
-        subpart = request.subpart
-        success = self.grasp_object(obj_id, subpart)
-        response.success = success
-        return response
+    def grasp_mug_body_policy(self):
+        return self.grasp_object('mug', 'body')
+
+    def grasp_screwdriver_handle_policy(self):
+        return self.grasp_object('screwdriver', 'handle')
+
+    def grasp_banana_body_policy(self):
+        return self.grasp_object('banana', 'body')
+    
+    def grasp_scissors_handle_policy(self):
+        return self.grasp_object('scissors', 'handle')
     
     def grasp_object(self, obj_id, subpart):
         """Grasp an object if it's visible at current location"""
@@ -247,13 +231,19 @@ class PickAndPlaceSim(Node):
             return True
         else:
             self.get_logger().error(f"Object {obj_id} is not on the table and thus cannot be picked.")
-        return False
+        return False 
+
+    def release_on_table_policy(self):
+        return self.release_object('table')
     
-    def release_object_callback(self, request, response):
-        loc = request.location
-        success = self.release_object(loc)
-        response.success = success
-        return response 
+    def release_in_trash_policy(self):
+        return self.release_object('trash')
+
+    def release_on_shelf_policy(self):
+        return self.release_object('shelf')
+
+    def release_in_toolbox_policy(self):
+        return self.release_object('toolbox')
     
     def release_object(self, location):
         """Place currently grasped object at location"""
@@ -266,6 +256,9 @@ class PickAndPlaceSim(Node):
 
             self.publish_perceptions()
             return True
+        else :
+            self.get_logger().warning("WARNING - Robot has no object to release !")
+
         return False
     
     def update_visible_objects(self):
@@ -343,8 +336,6 @@ class PickAndPlaceSim(Node):
         """Execute the policy and publish perceptions."""
         self.get_logger().info("Executing policy " + str(request.policy))
         self.get_logger().info(f"ITERATION: {self.iteration}")
-
-        # self.random_object_to_pick()
 
         self.get_logger().info(f"OBJECTS BEFORE POLICY: {self.objects}")
         self.get_logger().info(f"GRASPED OBJECT BEFORE: ({self.grasped_object}, {self.grasped_part})")
