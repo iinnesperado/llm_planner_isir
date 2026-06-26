@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'llm_planner_simulator'
+package_name = 'workstation_simulator'
 
 setup(
     name=package_name,
@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'pick_and_place_simulator = llm_planner_simulator.pick_and_place_sim:main',
+            'pick_and_place_simulator = workstation_simulator.pick_and_place_sim:main',
         ],
     },
 )
