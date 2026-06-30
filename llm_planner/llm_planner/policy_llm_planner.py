@@ -33,13 +33,16 @@ from llm_planner_interfaces.srv import GetTargetObject
 # NOTE check if drive class should be defined 
 
 class PolicyLLMPlanner(Policy):
-    def __init__(self, name="policy", llm_model_name="llama3.2", ltm_id = None, **params):
+    def __init__(self, name="policy", llm_model_name="llama3.2", ltm_id = None, prompts=[], **params):
         super().__init__(name, **params)
         self.ltm_id = ltm_id
         self.policies = self.configure_policies()
 
         self.llm_client = LLMClient(model_name=llm_model_name)
-        self.prompt_dir = os.path.join(pathlib.Path(__file__).parent.resolve(), "prompts")
+        # self.prompt_dir = os.path.join(pathlib.Path(__file__).parent.resolve(), "prompts")
+        self.high_level_prompt = prompts["high_level_prompt"]
+        self.low_level_prompt = prompts["low_level_prompt"]
+        self.outcome_prompt = prompts["outcome_prompt"]
 
         self.perception_sub = {}
         self.cofigure_perception()
@@ -315,7 +318,7 @@ class PolicyLLMPlanner(Policy):
     # EO FRAMEWORK #
     ################
 
-    def resquest_llm_plan(self, task, perception):
+    def resquest_llm_plan(self, task):
         """
         Generates a plan to accomplish the given task and taking into account the perception of the robot.
         This plan follows the Expected Outcomes Framework.
@@ -337,15 +340,15 @@ class PolicyLLMPlanner(Policy):
 
         return low_level_plan
     
-    def high_level_plan(self, task, perception):
+    def high_level_plan(self, task):
         """
         Generate a high-level plan of the given task.
         """
-        file_path = os.path.join(self.prompt_dir, "high_level_prompt.txt")
-        with open(file_path) as f :
-            prompt = f.read()
+        # file_path = os.path.join(self.prompt_dir, "high_level_prompt.txt")
+        # with open(file_path) as f :
+        #     prompt = f.read()
         
-        prompt = re.sub(r"{task}", task, prompt)
+        prompt = re.sub(r"{task}", task, self.high_level_prompt)
 
         response = self.llm_client.generate(prompt)
 
@@ -355,11 +358,11 @@ class PolicyLLMPlanner(Policy):
         """
         Generates the expected outcomes of the high level plan of the given task.
         """
-        file_path = os.path.join(self.prompt_dir, "outcome_prompt.txt")
-        with open(file_path) as f :
-            prompt = f.read()
+        # file_path = os.path.join(self.prompt_dir, "outcome_prompt.txt")
+        # with open(file_path) as f :
+        #     prompt = f.read()
 
-        prompt = re.sub(r"{task}", task, prompt)
+        prompt = re.sub(r"{task}", task, self.outcome_prompt)
         prompt = re.sub(r"{plan}", high_level_plan, prompt)
 
         response = self.llm_client.generate(prompt)
@@ -370,14 +373,13 @@ class PolicyLLMPlanner(Policy):
         """
         Generates the low level plan for the robot of a high level plan, its expected outcomes of the given task.
         """
-        file_path = os.path.join(self.prompt_dir, "low_level_prompt.txt")
-        with open(file_path) as f :
-            prompt = f.read()
+        # file_path = os.path.join(self.prompt_dir, "low_level_prompt.txt")
+        # with open(file_path) as f :
+        #     prompt = f.read()
 
-        prompt = re.sub(r"{task}", task, prompt)
+        prompt = re.sub(r"{task}", task, self.low_level_prompt)
         prompt = re.sub(r"{plan}", high_level_plan, prompt)
         prompt = re.sub(r"{EO}", expected_outcomes, prompt)
-        # TODO add skills to come from the LTM for the prompt 
 
         response = self.llm_client.generate(prompt)
 
