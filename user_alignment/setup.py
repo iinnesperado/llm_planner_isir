@@ -2,7 +2,7 @@ import os
 from glob import glob
 from setuptools import find_packages, setup
 
-package_name = 'workstation_simulator'
+package_name = 'user_alignment'
 
 setup(
     name=package_name,
@@ -12,7 +12,6 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        (   os.path.join('share', package_name, 'config'), glob('config/*.[png]*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -23,7 +22,6 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'pick_and_place_simulator = workstation_simulator.pick_and_place_sim:main',
         ],
     },
 )

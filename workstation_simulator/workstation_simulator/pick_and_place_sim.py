@@ -8,12 +8,13 @@ from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rcl_interfaces.msg import ParameterDescriptor
 
+from sensor_msgs.msg import Image
 from core.service_client import ServiceClient
 from core_interfaces.srv import LoadConfig
 from core.utils import class_from_classname
 
 from llm_planner_interfaces.srv import GraspObject, ReleaseObject
-
+from user_alignment.utils import png_to_ros_img
 
 
 
@@ -99,12 +100,26 @@ class PickAndPlaceSim(Node):
                 self.base_messages[sid] = class_from_classname(classname.replace("List", ""))
             elif "Float" in classname:
                 self.perceptions[sid].data = 0.0
-            else:
+            elif "String" in classname:
                 self.perceptions[sid].data = ""
+            elif "Image" in classname:
+                self.perceptions[sid] = self.setup_camera_img()
+                
             self.get_logger().info("I will publish " + str(sid) + " to... " + str(topic))
             self.sim_publishers[sid] = self.create_publisher(message, topic, 0)
         
         self.get_logger().debug(f"Setup perceptions finished : {self.perceptions}")
+
+    def setup_camera_img(self):
+        """
+        Sets up the static image to be published during the simulation.
+        Only used for testing wihout a camera in simulator.
+        """
+        img_msg = png_to_ros_img("build/workstation_simulator/workstation_simulator/config/workstation_img.png")
+        img_msg.header.stamp = self.get_clock().now().to_msg()
+
+        return img_msg
+
     
     def setup_control_channel(self, simulation):
         """
