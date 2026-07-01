@@ -17,7 +17,6 @@ from cognitive_nodes.policy import Policy
 from core.service_client import ServiceClient, ServiceClientAsync
 from core.utils import class_from_classname
 
-from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM, CreateNode, UpdateNeighbor, DeleteNode
 from cognitive_node_interfaces.srv import Execute, Predict
 from cognitive_node_interfaces.msg import Episode as EpisodeMsg
@@ -74,17 +73,31 @@ class PolicyLLMPlanner(Policy):
         Information used when creating the Pnodes.
         """
         subscriber = self.create_subscription(
-            String, 
-            "/simulator/sensor/grasped_object", # TODO check if the name is correct for the service 
+            PerceptionStamped, 
+            "perception/grasped_object/value", # TODO check if the name is correct for the service 
             self.perception_callback, 
             1, 
-            callback_group=self.cbgroup_activation
+            callback_group=self.cbgroup_service
         )
         data = ""
         updated = False
         new_input = dict(subscriber=subscriber, data=data, updated=updated)
         self.perception_sub["grasped_object"] = new_input
         self.get_logger().info(f"{self.name} -- Subscribed to 'grasped_object' perception topic")
+    
+    def perception_callback(self, msg: PerceptionStamped):
+        """
+        Callback method that reads a perception and stores it in perception_sub list. 
+        This function should be called everytime the perception topic for 'grasped_object' publishes information. 
+        """
+        perception_dict = perception_msg_to_dict(msg.perception)
+        if len(perception_dict)>1:
+            self.get_logger().error(f"{self.name} -- Received perception with multiple sensors: {perception_dict.keys()}. Perception nodes should (currently) include only one sensor!")
+        if len(perception_dict)==1:
+            self.perception_sub['grasped_object']['data'] = perception_dict['grasped_object']
+            self.perception_sub['grasped_object']['updated'] = True
+        else :
+            self.get_logger().warning(f"Empty perception received in Policy LLM Planner. No update in the perceptions.")
     
     async def execute_callback(self, request, response):
         """
@@ -204,18 +217,6 @@ class PolicyLLMPlanner(Policy):
             self.node_clients[service_name] = ServiceClient(DeleteNode, service_name)
         response = self.node_clients[service_name].send_request(name=name)
         return response.deleted
-    
-    def perception_callback(self, msg: String):
-        """
-        Callback method that reads a perception and stores it in perception_sub list. 
-        This function should be called everytime the perception topic for 'grasped_object' publishes information. 
-        """
-        perception = msg.data
-        if perception != "":
-            self.perception_sub['grasped_object']['data'] = perception
-            self.perception_sub['grasped_object']['updated'] = True
-        else :
-            self.get_logger().warning(f"Empty perception received in Policy LLM Planner. No update in the perceptions.")
 
     def get_cnode_name(self):
         """
