@@ -1,5 +1,7 @@
 import yaml
+import re
 
+from sensor_msgs.msg import Image
 from core.service_client import ServiceClient
 from core_interfaces.srv import CreateNode, UpdateNeighbor
 from cognitive_nodes.policy import Policy
@@ -8,7 +10,7 @@ from cognitive_node_interfaces.msg import PerceptionStamped
 
 from llm_planner.utils import perception_msg_to_dict
 
-from user_alignment.vlm_rag import VLMARG
+from user_alignment.vlm_rag import VLMRAG
 from user_alignment.utils import ros_img_to_base64
 
 class DriveUserAlignment(Drive):
@@ -44,7 +46,7 @@ class PolicyUserAlignment(Policy):
         super().__init__(name, **params)
         self.ltm_id = ltm_id
 
-        self.vlm_client = VLMARG()
+        self.vlm_client = VLMRAG()
 
         self.perception_sub = {}
 
@@ -59,19 +61,25 @@ class PolicyUserAlignment(Policy):
 
         perception_dict = perception_msg_to_dict(request.perception)
 
-        raise NotImplementedError
-
+        # raise NotImplementedError
         if self.perception_sub['robot_vision']['updated']:
-            # img_encoding = ros_img_to_base64(self.perception_sub['robot_vision']['data']) TODO change to new string format
-            object, action = self.vlm_client.infer(img_encoding)
+            self.perception_sub['robot_vision']['updated'] = False
 
-            pnode_name = object + "object_pnode"
-            if perception_dict['grasped_object'] == "None":
+            self.get_logger().info("Quering Ollama vision ...")
+            raw_vision = self.perception_sub['robot_vision']['data']
+            encoded_vision = ros_img_to_base64(raw_vision)
+            object, action = self.vlm_client.infer(encoded_vision)
+            action = re.sub(" ", "_", action)
+            self.get_logger().info(f"Result -- object: {object}, action: {action}")
+
+            pnode_name = object + "_object_pnode"
+            grasped_object = perception_dict['grasped_object'][0]
+            if grasped_object['data'] == "None":
                 is_grasped = False
             else : 
                 is_grasped = True
             pnode_params = {'target_object': object, 'is_grasped': is_grasped} 
-            self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPnode", pnode_params)
+            self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPNode", pnode_params)
 
             goal_name = action + "_goal"
             goal_params = {} # NOTE does it need a drive as neighbor ?
@@ -88,40 +96,37 @@ class PolicyUserAlignment(Policy):
             if not success:
                 self.get_logger().error(f"ERROR Planner Policy has not been linked to created CNode {cnode_name}")
 
-            self.get_logger().info(f"Policy {self.name} executed successfully.")
+        self.get_logger().info(f"Policy {self.name} executed successfully.")
 
         return response
-    
 
     def configure_perception(self):
         """
         Subscription to the perception topic 'robot_vision'.
         Information used for the VLM queries.
-        TODO change to string format of encoded image
         """
         subscriber = self.create_subscription(
-            PerceptionStamped,
-            "perception/robot_vision/value",
+            Image,
+            "/simulator/sensor/robot_vision",
             self.perception_callback,
             1,
-            callback_group=self.cbgroup_service
+            callback_group=self.cbgroup_activation
         )
-        data = ""
+        data = Image()
         updated = False
         new_input = dict(subscriber=subscriber, data=data, updated=updated)
         self.perception_sub["robot_vision"] = new_input
         self.get_logger().info(f"{self.name} -- Subscribed to 'robot_vision' perception topic")
 
-    def perception_callback(self, msg: PerceptionStamped):
+    def perception_callback(self, msg: Image):
         """
         Callback method that reads perception topic 'robot_vision' and stores it in perception_sub.
-        TODO change to now string format 
+        
+        :param msg: Image coming from the camera of the robot
+        :type msg: sensor_msgs.msg.Image
         """
-        perception_dict = perception_msg_to_dict(msg.perception)
-        if len(perception_dict)>1:
-            self.get_logger().error(f"{self.name} -- Received perception with multiple sensors: {perception_dict.keys()}. Perception nodes should (currently) include only one sensor!")
-        if len(perception_dict)==1:
-            self.perception_sub['robot_vision']['data'] = perception_dict['robot_vision']
+        if len(msg.data)!=0:
+            self.perception_sub['robot_vision']['data'] = msg
             self.perception_sub['robot_vision']['updated'] = True
         else :
             self.get_logger().warning("Empty 'robot_vision' perception received in Policy User Alignment. No update in the perceptions.")
