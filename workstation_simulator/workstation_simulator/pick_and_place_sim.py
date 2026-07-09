@@ -115,7 +115,7 @@ class PickAndPlaceSim(Node):
         Sets up the static image to be published during the simulation.
         Only used for testing wihout a camera in simulator.
         """
-        img_msg = png_to_ros_img("build/workstation_simulator/workstation_simulator/config/workstation_img.png")
+        img_msg = png_to_ros_img("build/workstation_simulator/workstation_simulator/config/mug_on_table.jpeg")
         img_msg.header.stamp = self.get_clock().now().to_msg()
 
         return img_msg
@@ -307,7 +307,7 @@ class PickAndPlaceSim(Node):
             publisher.publish(self.perceptions[ident])
 
     def reset_world(self, data):
-        self.get_logger().info(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
+        self.get_logger().debug(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
         # Reset robot to inital state
         self.grasped_object = None
         self.grasped_part = None
@@ -316,7 +316,7 @@ class PickAndPlaceSim(Node):
         self.reset_perceptions()
         self.update_visible_objects()
         self.publish_perceptions()
-        self.get_logger().info(f"DEBUG: WORLD RESET NEW: {self.perceptions}")
+        self.get_logger().debug(f"DEBUG: WORLD RESET NEW: {self.perceptions}")
 
     def world_reset_service_callback(self, request, response):
         self.reset_world(request)
