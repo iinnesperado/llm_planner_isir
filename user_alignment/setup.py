@@ -13,7 +13,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'faster-whisper', 'chromadb'],
     zip_safe=True,
     maintainer='ines',
     maintainer_email='ruizplovin@isir.upmc.fr',

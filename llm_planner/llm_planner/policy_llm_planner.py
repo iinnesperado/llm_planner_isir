@@ -77,7 +77,7 @@ class PolicyLLMPlanner(Policy):
             "perception/grasped_object/value", # TODO check if the name is correct for the service 
             self.perception_callback, 
             1, 
-            callback_group=self.cbgroup_service
+            callback_group=self.cbgroup_activation
         )
         data = ""
         updated = False
@@ -94,7 +94,7 @@ class PolicyLLMPlanner(Policy):
         if len(perception_dict)>1:
             self.get_logger().error(f"{self.name} -- Received perception with multiple sensors: {perception_dict.keys()}. Perception nodes should (currently) include only one sensor!")
         if len(perception_dict)==1:
-            self.perception_sub['grasped_object']['data'] = perception_dict['grasped_object']
+            self.perception_sub['grasped_object']['data'] = perception_dict['grasped_object'][0]['data']
             self.perception_sub['grasped_object']['updated'] = True
         else :
             self.get_logger().warning(f"Empty perception received in Policy LLM Planner. No update in the perceptions.")
