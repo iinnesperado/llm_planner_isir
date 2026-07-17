@@ -7,6 +7,7 @@ from core_interfaces.srv import CreateNode, UpdateNeighbor
 from cognitive_nodes.policy import Policy
 from cognitive_nodes.drive import Drive
 from cognitive_node_interfaces.msg import PerceptionStamped
+from cognitive_node_interfaces.srv import SetActivation
 
 from llm_planner.utils import perception_msg_to_dict
 
@@ -82,8 +83,11 @@ class PolicyUserAlignment(Policy):
             self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPNode", pnode_params)
 
             goal_name = action + "_goal"
-            goal_params = {} # NOTE does it need a drive as neighbor ?
+            goal_params = {"neighbors": [{"name": "object_in_place_drive", "node_type": "Drive"}]} # NOTE does it need a drive as neighbor ?
             self.create_node_client(goal_name, "cognitive_nodes.goal.GoalMotiven", goal_params) # TODO double check is the right class
+            # success = self.set_activation("goal", goal_name, 1.0)
+            # if not success:
+            #     self.get_logger().error(f"ERROR Planner Policy did not set its activation value to 1.0.")
 
             cnode_name = object + "__" + action + "__cnode"
             neighbor_dict = {"PICK_AND_PLACE": "WorldModel", pnode_name: "PNode", goal_name: "Goal"}
@@ -96,6 +100,12 @@ class PolicyUserAlignment(Policy):
             if not success:
                 self.get_logger().error(f"ERROR Planner Policy has not been linked to created CNode {cnode_name}")
 
+            # success = self.set_activation_policy("llm_planner_policy", 1.0)
+            # if not success:
+            #     self.get_logger().error(f"ERROR Planner Policy did not set its activation value to 1.0.")
+
+
+        response.policy = self.name
         self.get_logger().info(f"Policy {self.name} executed successfully.")
 
         return response
@@ -174,3 +184,16 @@ class PolicyUserAlignment(Policy):
             self.node_clients[service_name] = ServiceClient(UpdateNeighbor, service_name)
         response=self.node_clients[service_name].send_request(node_name=node_name, neighbor_name=neighbor_name, operation=True)
         return response.success
+    
+    def set_activation(self, node_type, node_name, activation):
+        """
+        Sets the activation value of a given policy
+        """
+        self.get_logger().info(f"Setting activation value of {node_name}...")
+        service_name = node_type + "/" + node_name + "/set_activation"
+        if service_name not in self.node_clients:
+            self.node_clients[service_name] = ServiceClient(SetActivation, service_name)
+        response=self.node_clients[service_name].send_request(activation=activation)
+
+        self.get_logger().info(f"Activation of policy {node_name} was successfully set to {activation}: {response.set}.")
+        return response.set
