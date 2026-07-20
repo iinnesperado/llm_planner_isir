@@ -15,7 +15,7 @@ class SemanticPNode(PNode):
         :param target_object: equiv to "target_object is on the table/ my hand"
         :param is_grasped: makes reference if the Pnode is gonna be "table" or "grasper" type, as in it has the object on its hand or not
         """
-        space = SemanticSpace(target_object=target_object, is_grasped=is_grasped)
+        space = SemanticSpace(target_object=target_object, is_grasped=is_grasped, ident=name+ " space")
         super().__init__(name, class_name, space=space, **params)
 
         self.target_object = target_object

@@ -83,11 +83,12 @@ class PolicyUserAlignment(Policy):
             self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPNode", pnode_params)
 
             goal_name = action + "_goal"
-            goal_params = {"neighbors": [{"name": "object_in_place_drive", "node_type": "Drive"}]} # NOTE does it need a drive as neighbor ?
-            self.create_node_client(goal_name, "cognitive_nodes.goal.GoalMotiven", goal_params) # TODO double check is the right class
-            # success = self.set_activation("goal", goal_name, 1.0)
-            # if not success:
-            #     self.get_logger().error(f"ERROR Planner Policy did not set its activation value to 1.0.")
+            # goal_params = {"neighbors": [{"name": "object_in_place_drive", "node_type": "Drive"}]} # NOTE does it need a drive as neighbor ?
+            goal_params = {}
+            self.create_node_client(goal_name, "dummy_nodes.dummy_goal.GoalDummy", goal_params) # TODO double check is the right class
+            success = self.set_activation("goal", goal_name, 1.0)
+            if not success:
+                self.get_logger().error(f"ERROR {goal_name} did not set its activation value to 1.0.")
 
             cnode_name = object + "__" + action + "__cnode"
             neighbor_dict = {"PICK_AND_PLACE": "WorldModel", pnode_name: "PNode", goal_name: "Goal"}

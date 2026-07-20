@@ -248,16 +248,16 @@ class PickAndPlaceSim(Node):
             self.get_logger().error(f"Object {obj_id} is not on the table and thus cannot be picked.")
         return False 
 
-    def release_on_table_policy(self):
+    def release_at_table_policy(self):
         return self.release_object('table')
     
-    def release_in_trash_policy(self):
+    def release_at_trash_policy(self):
         return self.release_object('trash')
 
-    def release_on_shelf_policy(self):
+    def release_at_shelf_policy(self):
         return self.release_object('shelf')
 
-    def release_in_toolbox_policy(self):
+    def release_at_toolbox_policy(self):
         return self.release_object('toolbox')
     
     def release_object(self, location):

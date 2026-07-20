@@ -229,7 +229,7 @@ class PolicyLLMPlanner(Policy):
         neighbors = data['neighbors']
 
         for node in neighbors:
-            if node['node_type'] == 'Cnode':
+            if node['node_type'] == 'CNode':
                 cnode_name = node['name']
         
         return cnode_name
@@ -291,7 +291,7 @@ class PolicyLLMPlanner(Policy):
         :return: True if the neighbor was added successfully, False otherwise.
         :rtype: bool
         """
-        service_name=f"{self.LTM_id}/update_neighbor"
+        service_name=f"{self.ltm_id}/update_neighbor"
         if service_name not in self.node_clients:
             self.node_clients[service_name] = ServiceClient(UpdateNeighbor, service_name)
         response=self.node_clients[service_name].send_request(node_name=node_name, neighbor_name=neighbor_name, operation=True)
@@ -308,7 +308,7 @@ class PolicyLLMPlanner(Policy):
         :return: True if the neighbor was deleted successfully, False otherwise.
         :rtype: bool
         """
-        service_name=f"{self.LTM_id}/update_neighbor"
+        service_name=f"{self.ltm_id}/update_neighbor"
         if service_name not in self.node_clients:
             self.node_clients[service_name] = ServiceClient(UpdateNeighbor, service_name)
         response=self.node_clients[service_name].send_request(node_name=node_name, neighbor_name=neighbor_name, operation=False)
