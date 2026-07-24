@@ -24,11 +24,14 @@ class SemanticSpace(PointBasedSpace):
 
         :return activation_value: 1 if it's a grasper type, 0.7 if it's a table type
         """
-        if perception['grasped_object'] == self.target_object:
+        grasped_obj = perception['grasped_object'][0]
+        if grasped_obj['data'] == self.target_object:
             if self.is_grasped:
-                return 1
+                return 1.0
         elif not self.is_grasped:
-            if self.target_object in perception["objects"]:
-                return 0.7
+            objects_list = [obj['name'] for obj in perception['objects']]
+            if self.target_object in objects_list:
+                # return 0.7
+                return 1.0
 
-        return 0
+        return 0.0
