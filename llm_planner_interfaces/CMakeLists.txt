@@ -19,6 +19,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GraspObject.srv"
   "srv/ReleaseObject.srv"
   "srv/GetTargetObject.srv"
+  "srv/GetAlignmentInformation.srv"
   # DEPENDENCIES builtin_interfaces
 )
 

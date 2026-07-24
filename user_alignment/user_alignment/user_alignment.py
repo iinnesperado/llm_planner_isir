@@ -10,6 +10,7 @@ from cognitive_node_interfaces.msg import PerceptionStamped
 from cognitive_node_interfaces.srv import SetActivation
 
 from llm_planner.utils import perception_msg_to_dict
+from llm_planner_interfaces.srv import GetAlignmentInformation
 
 from user_alignment.vlm_rag import VLMRAG
 from user_alignment.utils import ros_img_to_base64
@@ -46,18 +47,27 @@ class DriveUserAlignment(Drive):
 class PolicyUserAlignment(Policy):
     def __init__(self, name="policy", ltm_id=None, **params):
         super().__init__(name, **params)
-        self.ltm_id = ltm_id
-
+        if ltm_id is None:
+            raise Exception('No LTM input was provided.')
+        else:    
+            self.LTM_id = ltm_id
+        
         self.vlm_client = VLMRAG()
 
         self.perception_sub = {}
 
         self.configure_perception()
 
-        if ltm_id is None:
-            raise Exception('No LTM input was provided.')
-        else:    
-            self.LTM_id = ltm_id
+        self.get_action_service = self.create_service(
+            GetAlignmentInformation, 
+            "user_alignment/get_alignment_information", 
+            self.get_alignment_information_callback, 
+            callback_group=self.cbgroup_server
+        )
+
+        self.object = None
+        self.pnode = None
+        self.goal = None
 
     async def execute_callback(self, request, response):
         """
@@ -78,23 +88,22 @@ class PolicyUserAlignment(Policy):
             object, action = self.vlm_client.infer(encoded_vision)
             action = re.sub(" ", "_", action)
             self.get_logger().info(f"Result -- object: {object}, action: {action}")
+            self.object = object
 
             pnode_name = object + "_object_pnode"
             grasped_object = perception_dict['grasped_object'][0]
-            if grasped_object['data'] == "None":
+            if (grasped_object['data'] == "None") or (grasped_object['data'] == ""):
                 is_grasped = False
             else : 
                 is_grasped = True
             pnode_params = {'target_object': object, 'is_grasped': is_grasped} 
             await self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPNode", pnode_params)
+            self.pnode = pnode_name
 
             goal_name = action + "_goal"
-            goal_params = {"neighbors": [{"name": "object_in_place_drive", "node_type": "Drive"}]} # NOTE does it need a drive as neighbor ?
-            # goal_params = {}
-            await self.create_node_client(goal_name, "dummy_nodes.dummy_goal.GoalDummy", goal_params) # TODO double check is the right class
-            # success = await self.set_activation("goal", goal_name, 1.0)
-            # if not success.set:
-            #     self.get_logger().error(f"ERROR {goal_name} did not set its activation value to 1.0.")
+            goal_params = {"neighbors": [{"name": "object_in_place_drive", "node_type": "Drive"}]}
+            await self.create_node_client(goal_name, "dummy_nodes.dummy_goal.GoalDummy", goal_params)
+            self.goal = goal_name
 
             cnode_name = object + "__" + action + "__cnode"
             neighbor_dict = {"PICK_AND_PLACE": "WorldModel", pnode_name: "PNode", goal_name: "Goal"}
@@ -155,4 +164,10 @@ class PolicyUserAlignment(Policy):
         response=self.node_clients[service_name].send_request_async(activation=activation)
 
         # self.get_logger().info(f"Activation of policy {node_name} was successfully set to {activation}: {response.set}.")
+        return response
+
+    def get_alignment_information_callback(self, request, response):
+        response.goal = self.goal
+        response.target_object = self.object
+        response.pnode_name = self.pnode
         return response
