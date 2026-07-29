@@ -1,0 +1,7 @@
+string[]                            target_objects   # object to look for
+---
+bool                                success         # indicate successful run of triggered service
+geometry_msgs/TransformStamped[]    w_h_objs        # objs poses in world frame
+string[]                            labels          # objects labels
+std_msgs/Float32MultiArray          scores          # pose scores 
+sensor_msgs/PointCloud2             filtered_pc     # filtered point cloud in world frame
