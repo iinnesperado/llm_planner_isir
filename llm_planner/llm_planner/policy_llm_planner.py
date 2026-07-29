@@ -14,12 +14,13 @@ from rclpy.time import Time
 from cognitive_nodes.drive import Drive
 from cognitive_nodes.goal import Goal
 from cognitive_nodes.policy import Policy
+from cognitive_nodes.utils import LTMSubscription
 from core.service_client import ServiceClient, ServiceClientAsync
 from core.utils import class_from_classname
 
 from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM, CreateNode, UpdateNeighbor, DeleteNode
-from cognitive_node_interfaces.srv import Execute, Predict
+from cognitive_node_interfaces.srv import Execute, Predict, GetInformation
 from cognitive_node_interfaces.msg import Episode as EpisodeMsg
 from cognitive_node_interfaces.msg import Perception, PerceptionStamped
 from cognitive_processes_interfaces.msg import ControlMsg
@@ -28,18 +29,96 @@ from llm_planner.space import SemanticSpace
 from llm_planner.perception import SemanticPerception
 from llm_planner.llm_client import LLMClient # TODO check if the import is right for the ros thing
 from llm_planner.utils import perception_msg_to_dict
-from llm_planner_interfaces.srv import GetTargetObject
+from llm_planner_interfaces.srv import GetTargetObject, GetAlignmentInformation
 
-# NOTE check if drive class should be defined 
+class DriveLLMPlanner(Drive, LTMSubscription):
+    """
+    DriveLLMPlanner Class, responsible to activate the PolicyLLMPlanner when high level goals have not been planned. 
+    """    
+    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", ltm_id=None, **params):
+        """
+        Constructor of the DriveLLMPlanner class.
+
+        :param name: The name of the Drive instance.
+        :type name: str
+        :param class_name: The name of the Drive class, defaults to "cognitive_nodes.drive.Drive".
+        :type class_name: str
+        """        
+        super().__init__(name, class_name, **params)
+        if ltm_id is None:
+            raise Exception('No LTM input was provided.')
+        else:    
+            self.LTM_id = ltm_id
+
+        self.configure_ltm_subscription(self.LTM_id, self.cbgroup_client)
+
+    def read_ltm(self, ltm_dump):
+        """
+        Reads the LTM dump and saves the information on the goals and cnodes.
+        """
+        self.cnode_dict = ltm_dump['CNode']
+        self.goal_dict = ltm_dump['Goal']
+
+    def evaluate(self, perception=None):
+        """
+        Evaluation that returns 0.6 when there is a goal that needs to be planned.
+
+        :param perception: Unused perception.
+        :type perception: dict or Any.
+        :return: Evaluation of the Drive.
+        :rtype: cognitive_node_interfaces.msg.Evaluation
+        """        
+        value = 0.0     # evaluation value for the drive 
+        all_neighbors_goal = []
+
+        for cnode in self.cnode_dict:
+            all_neighbors_goal.append(self.get_neighbor_names(cnode['name']))
+
+        goals_diff = set(self.goal_dict) - set(all_neighbors_goal)
+        if len(goals_diff) > 0:
+            self.get_logger().info(f"The following Goals need a plan: {goals_diff}")
+            value = 0.6
+
+        self.evaluation.evaluation = value
+        self.evaluation.timestamp = self.get_clock().now().to_msg()
+        return self.evaluation
+
+    def get_neighbor_names(self, cnode_name):
+        """
+        This method returns the names of the neighbors (Goal type only) of a CNode.
+
+        :param cnode_name: Name of the CNode.
+        :type cnode_name: str.
+        :return: List of neighbor names.
+        :rtype: list.
+        """        
+        neighbors = self.cnode_dict.get(cnode_name, {}).get("neighbors", [])
+        names = []
+        for neighbor in neighbors:
+            if neighbor['note_type'] == 'Goal':
+                names.append(neighbor['name'])
+        return names
 
 class PolicyLLMPlanner(Policy):
-    def __init__(self, name="policy", llm_model_name="llama3.2", ltm_id = None, **params):
+    def __init__(self, name="policy", llm_model_name="llama3.2", ltm_id = None, prompts=[], executed_primitive_service="", **params):
+        """
+        :param executed_primitive_service: name of the service to execute the primitives of the robot, same name as executed_policy_service in yaml config file
+        :type executed_primitive_service: str
+        """
         super().__init__(name, **params)
-        self.ltm_id = ltm_id
+        if ltm_id is None:
+                    raise Exception('No LTM input was provided.')
+        else:    
+            self.LTM_id = ltm_id
         self.policies = self.configure_policies()
 
+        self.executed_primitive_service = executed_primitive_service
+        self.executed_primitive_type = class_from_classname("cognitive_node_interfaces.srv.Policy")
+
         self.llm_client = LLMClient(model_name=llm_model_name)
-        self.prompt_dir = os.path.join(pathlib.Path(__file__).parent.resolve(), "prompts")
+        self.high_level_prompt = prompts["high_level_prompt"]
+        self.low_level_prompt = prompts["low_level_prompt"]
+        self.outcome_prompt = prompts["outcome_prompt"]
 
         self.perception_sub = {}
         self.cofigure_perception()
@@ -49,18 +128,18 @@ class PolicyLLMPlanner(Policy):
         Requests data from the LTM.
         """        
         # Call get_node service from LTM
-        service_name = "/" + str(self.ltm_id) + "/get_node"
+        service_name = "/" + str(self.LTM_id) + "/get_node"
         request = ""
-        client = ServiceClient(GetNodeFromLTM, service_name)
-        ltm_response = client.send_request(name=request)
+        client = ServiceClientAsync(self, GetNodeFromLTM, service_name, self.cbgroup_server)
+        ltm_response = client.send_request_async(name=request)
         ltm = yaml.safe_load(ltm_response.data)
         return ltm
     
-    def configure_policies(self):
+    async def configure_policies(self):
         """
         Creates a list of eligible policies to be executed and shuffles it.
         """
-        ltm_cache = self.request_ltm()        
+        ltm_cache = await self.request_ltm()        
         policies = list(ltm_cache["Policy"].keys())
         self.get_logger().info(f"Configuring Policies: {policies}") #TODO: Possibility of using new policies added in LTM
         return policies
@@ -71,17 +150,31 @@ class PolicyLLMPlanner(Policy):
         Information used when creating the Pnodes.
         """
         subscriber = self.create_subscription(
-            String, 
-            "/simulator/sensor/grasped_object", # TODO check if the name is correct for the service 
+            PerceptionStamped, 
+            "perception/grasped_object/value",
             self.perception_callback, 
             1, 
-            callback_group=self.cbgroup_activation
+            callback_group=self.cbgroup_server
         )
         data = ""
         updated = False
         new_input = dict(subscriber=subscriber, data=data, updated=updated)
         self.perception_sub["grasped_object"] = new_input
         self.get_logger().info(f"{self.name} -- Subscribed to 'grasped_object' perception topic")
+    
+    def perception_callback(self, msg: PerceptionStamped):
+        """
+        Callback method that reads a perception and stores it in perception_sub list. 
+        This function should be called everytime the perception topic for 'grasped_object' publishes information. 
+        """
+        perception_dict = perception_msg_to_dict(msg.perception)
+        if len(perception_dict)>1:
+            self.get_logger().error(f"{self.name} -- Received perception with multiple sensors: {perception_dict.keys()}. Perception nodes should (currently) include only one sensor!")
+        if len(perception_dict)==1:
+            self.perception_sub['grasped_object']['data'] = perception_dict['grasped_object'][0]['data']
+            self.perception_sub['grasped_object']['updated'] = True
+        else :
+            self.get_logger().warning(f"Empty perception received in Policy LLM Planner. No update in the perceptions.")
     
     async def execute_callback(self, request, response):
         """
@@ -90,232 +183,130 @@ class PolicyLLMPlanner(Policy):
         :type request: cognitive_node_interfaces.srv.Execute.Request
         :param response: The response indicating the executed policy.
         :type response: cognitive_node_interfaces.srv.Execute.Response
-        :raise NotImplementedError: This method should be implemented in subclasses.
         """
         self.get_logger().info(f"== START LLM PLANNER CALLBACK EXECUTE ==")
 
         perception_dict = perception_msg_to_dict(request.perception)
-        self.get_logger().info(f"Reveived perception: {perception_dict}")
+        self.get_logger().info(f"Received perception: {perception_dict}")
 
-        goal = self.get_high_level_goal_name()
+        alignment_cnode = self.get_cnode_name()
+        # cnode_split = cnode.split("__")
+        # target_object = cnode_split[0]
+        # action = cnode_split[1]
+        # goal_name = action + "__goal"
+        # self.get_logger().info(f"Object name: {target_object}, action: {action}")        
+                
+        alignment_response = await self.get_alignment_information()
+        goal_name = alignment_response.goal_name
+        action = re.sub(r"__goal", "", goal_name)
+        self.get_logger().info(f"Alignment response {alignment_response}")
 
-        plan = self.resquest_llm_plan(goal)
+
+        plan = self.resquest_llm_plan(goal_name)
+        try:
+            plan_list = ast.literal_eval(plan)
+        except (ValueError, SyntaxError) as e:
+            self.get_logger().error(f"Invalid plan returned by LLM: {plan}. Error: {e}")
         self.get_logger().info(f"LLM generated plan: {plan}")
+    
+        for idx, policy in enumerate(plan_list): 
+            self.get_logger().info(f"Working on plan step {idx+1}: {policy}...")
 
-        name = re.sub(r"_goal", "", goal)
-
-        for idx, policy in plan.enumerate(): 
-            self.get_logger().info(f"Working on plan step {idx}: {policy}...")
-
-            if policy not in self.policies:
-                self.get_logger().error("LLM DID NOT RETURN A VALID POLICY. CHOOSING RANDOMLY...")
-                return
+            # if policy not in self.policies:
+            #     self.get_logger().error("LLM DID NOT RETURN A VALID POLICY. CHOOSING RANDOMLY...")
+            #     return
             
-            if self.perception_sub['grasped_object']['updated']:
+            target_object = alignment_response.target_object
+            if idx == 0:
+                # in this case the pnode already created by user alignment is used
+                pnode_name = target_object + "__object_pnode"
+            elif self.perception_sub['grasped_object']['updated']:
                 self.get_logger().info("Creating PNode...")
-
                 self.perception_sub['grasped_object']['updated'] = False
                 
-                pnode_name = f"{name}_step_{idx}_pnode"
                 pnode_params = {}
-                target_object = self.get_pnode_target_object()
-                if self.perception_sub["grasped_object"]["data"]=="None":
-                    pnode_params = {"target_object": target_object, "is_grasped": False}
-                elif self.perception_sub["graped_object"]["data"]!="":
-                    pnode_params = {"target_object": target_object, "is_grasped": True}
-                self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPnode", pnode_params)
+                if (self.perception_sub["grasped_object"]["data"]=="None" or self.perception_sub["grasped_object"]["data"]==""):
+                    is_grasped = False
+                    pnode_name = f"{target_object}__object_pnode"
+                else :
+                    is_grasped = True
+                    pnode_name = f"grasped__{target_object}__object_pnode"
+                pnode_params = {"target_object": target_object, "is_grasped": is_grasped}
+                await self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPnode", pnode_params)
             else :
-                self.get_logger().warning("LLMPlanner - perception was not updated thus PNode was not created!")
+                self.get_logger().warning("LLMPlanner - perception was not updated, so PNode was not created!")
+
             
-            # if policy not in self.node_clients :
-            #     self.node_clients[policy] = ServiceClientAsync(Policy, '/simulator/executed_policy', callback_group=self.cbgroup_client)
-            self.get_logger().info(f"Executing plan step {idx}: {policy}...")
-            await self.node_clients[policy].send_request_async(policy=policy)
+            self.get_logger().info(f"Executing plan step {idx+1}: {policy}...")
+            if self.executed_primitive_service not in self.node_clients:
+                self.node_clients[self.executed_primitive_service] = ServiceClientAsync(self, self.executed_primitive_type, self.executed_primitive_service, self.cbgroup_client)
+            await self.node_clients[self.executed_primitive_service].send_request_async(policy=policy)
             
-            cnode_name = f"{name}_step_{idx}_cnode"
+            cnode_name = f"{action}__step_{idx+1}_cnode"
             neighbors = [
                 {"name": "PICK_AND_PLACE", "node_type": "WorldModel"},
-                {"name": goal, "node_type": "Goal"},
+                {"name": goal_name, "node_type": "goal_name"},
                 {"name": pnode_name, "node_type": "PNode"},
             ]
             cnode_params = {"neighbors": neighbors}
-            self.create_node_client(cnode_name, "cognitive_nodes.cnode.CNode", cnode_params)
+            await self.create_node_client(cnode_name, "cognitive_nodes.cnode.CNode", cnode_params)
 
-            sucess = self.add_neighbor(policy, cnode_name)
-            if sucess:
+            sucess = await self.add_neighbor_client(policy, cnode_name)
+            if sucess.success:
                 self.get_logger().info(f"Successfully added the Cnode {cnode_name} as neighbor to policy {policy}")
             else :
-                self.get_logger().error(f"ERROR Policy of the step {idx} hasn't been linked to corresponding Cnode {cnode_name}")
+                self.get_logger().error(f"ERROR Failed to link policy {policy} to CNode {cnode_name}")
             
 
         response.policy = self.name 
 
-        #NOTE TO REVISE WITH THE NEW DUMMY NODES NETWORK
-        self.delete_cnode_llm_planner()
-        self.delete_neighbor(self.name, self.get_cnode_name())
+        await self.my_delete_node(alignment_cnode)
+        await self.delete_neighbor_client(self.name, self.get_cnode_name())
 
         self.get_logger().info(f"Policy {self.name} executed successfully.")
 
         return response
-
-    def delete_cnode_llm_planner(self):
-        """Responsible of deleting the cnode that is responsible of the call for the llm planner the whole plan has been executed."""
-        cnode = self.get_cnode_name()
-        deleted = self.delete_node_client(cnode)
-
-        self.get_logger().info(f"Deletation of cnode llm_planner was successful: {deleted}")
-
-        return deleted
     
-    def create_node_client(self, name, class_name, parameters={}):
-        """
-        This method calls the add node service of the commander.
-
-        :param name: Name of the node to be created.
-        :type name: str
-        :param class_name: Name of the class to be used for the creation of the node.
-        :type class_name: str
-        :param parameters: Optional parameters that can be passed to the node, defaults to {}.
-        :type parameters: dict
-        :return: Success status received from the commander.
-        :rtype: bool
-        """
-
-        self.get_logger().info("Requesting node creation...")
-        params_str = yaml.dump(parameters, sort_keys=False)
-        service_name = "commander/create"
-        if service_name not in self.node_clients:
-            self.node_clients[service_name] = ServiceClient(CreateNode, service_name)
-        response = self.node_clients[service_name].send_request(
-            name=name, class_name=class_name, parameters=params_str
-        )
-
-        self.get_logger().info(f"Creation of node {name} was successful: {response.created}.")
-
-        return response.created
-    
-    def delete_node_client(self, name):
+    def my_delete_node(self, name):
         self.get_logged().info("Requesting node deletion")
         service_name = "commander/delete"
         if service_name not in self.node_clients:
-            self.node_clients[service_name] = ServiceClient(DeleteNode, service_name)
-        response = self.node_clients[service_name].send_request(name=name)
-        return response.deleted
-    
-    def perception_callback(self, msg: String):
-        """
-        Callback method that reads a perception and stores it in perception_sub list. 
-        This function should be called everytime the perception topic for 'grasped_object' publishes information. 
-        """
-        perception = msg.data
-        if perception != "":
-            self.perception_sub['grasped_object']['data'] = perception
-            self.perception_sub['grasped_object']['updated'] = True
-        else :
-            self.get_logger().warning(f"Empty perception received in Policy LLM Planner. No update in the perceptions.")
+            self.node_clients[service_name] = ServiceClientAsync(self, DeleteNode, service_name, self.cbgroup_client)
+        response=self.node_clients[service_name].send_request_async(name=name)
+        return response
 
     def get_cnode_name(self):
         """
         Retrives the name of the Cnode calling the policy LLM Planner.
         We suppose that the policy LLM Planner has the cnode that calls for him as a neighbor.
         """
-        cnode_name = None
-        ltm_cache = self.request_ltm()
-        data = next((nodes_dict[self.name] for nodes_dict in ltm_cache.values() if self.name in nodes_dict))
-        neighbors = data['neighbors']
 
-        for node in neighbors:
-            if node['node_type'] == 'Cnode':
-                cnode_name = node['name']
+        neighbors_name = [node['name'] for node in self.neighbors]
+        neighbors_type = [node['node_type'] for node in self.neighbors]
+
+        for i, node_type in enumerate(neighbors_type):
+            if node_type == "CNode":
+                return neighbors_name[i]
         
-        return cnode_name
+        return None
 
-    def get_high_level_goal_name(self):
-        """Retrieves the high level goal of the cnode calling the policy LLM Planner."""
-        goal = None
-        ltm_cache = self.request_ltm()
-        cnode_name = self.get_cnode_name()
-
-        if cnode_name is None:
-            self.get_logger().error("ERROR LLM Planner doesn't have a Cnode as neighbor")
-        else :
-            data = next((nodes_dict[cnode_name] for nodes_dict in ltm_cache.values() if cnode_name in nodes_dict))
-            neighbors = data['neighbors']
-
-            for node in neighbors:
-                if node['node_type'] == 'Goal':
-                    goal = node['name']
-
-            self.get_logger().info(f"GOAL of the LLMPlanner : {goal}")
-        
-        return goal
-    
-    def get_pnode_target_object(self, pnode_name):
+    def get_alignment_information(self):
         """
-        Retrieves the target_object from the pnode neighboor of the cnode calling this policy.
+        Get the objetc, goal, pnode name information from the User Alignment policy.
         """
-        pnode_name = None
-        ltm_cache = self.request_ltm()
-        cnode_name = self.get_cnode_name()
-
-        if cnode_name is None:
-            self.get_logger().error("ERROR LLM Planner doesn't have a Cnode as neighbor")
-        else :
-            data = next((nodes_dict[cnode_name] for nodes_dict in ltm_cache.values() if cnode_name in nodes_dict))
-            neighbors = data['neighbors']
-
-            for node in neighbors:
-                if node['node_type'] == 'PNode':
-                    pnode_name = node['name']
-
-        self.get_logger().info("Requesting target object to PNode...")
-        service_name = "pnode/" + str(pnode_name) + "get_target_object"
+        service_name = "user_alignment/get_alignment_information"
         if service_name not in self.node_clients:
-            self.node_clients[service_name] = ServiceClient(GetTargetObject, service_name)
-        response = self.node_clients[service_name].send_request()
-        return response.target_object
+            self.node_clients[service_name] = ServiceClientAsync(self, GetAlignmentInformation, service_name, self.cbgroup_client)
+        response = self.node_clients[service_name].send_request_async()
+        return  response
 
-
-    def add_neighbor(self, node_name, neighbor_name):
-        """
-        This method adds a neighbor to a node in the LTM.
-
-        :param node_name: Name of the node to which the neighbor will be added.
-        :type node_name: str
-        :param neighbor_name: Name of the neighbor to be added.
-        :type neighbor_name: str
-        :return: True if the neighbor was added successfully, False otherwise.
-        :rtype: bool
-        """
-        service_name=f"{self.LTM_id}/update_neighbor"
-        if service_name not in self.node_clients:
-            self.node_clients[service_name] = ServiceClient(UpdateNeighbor, service_name)
-        response=self.node_clients[service_name].send_request(node_name=node_name, neighbor_name=neighbor_name, operation=True)
-        return response.success
-    
-    def delete_neighbor(self, node_name, neighbor_name):
-        """
-        This method deletes a neighbor to a node in the LTM.
-
-        :param node_name: Name of the node to which the neighbor will be deleted.
-        :type node_name: str
-        :param neighbor_name: Name of the neighbor to be deleted.
-        :type neighbor_name: str
-        :return: True if the neighbor was deleted successfully, False otherwise.
-        :rtype: bool
-        """
-        service_name=f"{self.LTM_id}/update_neighbor"
-        if service_name not in self.node_clients:
-            self.node_clients[service_name] = ServiceClient(UpdateNeighbor, service_name)
-        response=self.node_clients[service_name].send_request(node_name=node_name, neighbor_name=neighbor_name, operation=False)
-        return response.success
 
 
     ################
     # EO FRAMEWORK #
     ################
 
-    def resquest_llm_plan(self, task, perception):
+    def resquest_llm_plan(self, task):
         """
         Generates a plan to accomplish the given task and taking into account the perception of the robot.
         This plan follows the Expected Outcomes Framework.
@@ -337,15 +328,15 @@ class PolicyLLMPlanner(Policy):
 
         return low_level_plan
     
-    def high_level_plan(self, task, perception):
+    def high_level_plan(self, task):
         """
         Generate a high-level plan of the given task.
         """
-        file_path = os.path.join(self.prompt_dir, "high_level_prompt.txt")
-        with open(file_path) as f :
-            prompt = f.read()
+        # file_path = os.path.join(self.prompt_dir, "high_level_prompt.txt")
+        # with open(file_path) as f :
+        #     prompt = f.read()
         
-        prompt = re.sub(r"{task}", task, prompt)
+        prompt = re.sub(r"{task}", task, self.high_level_prompt)
 
         response = self.llm_client.generate(prompt)
 
@@ -355,11 +346,11 @@ class PolicyLLMPlanner(Policy):
         """
         Generates the expected outcomes of the high level plan of the given task.
         """
-        file_path = os.path.join(self.prompt_dir, "outcome_prompt.txt")
-        with open(file_path) as f :
-            prompt = f.read()
+        # file_path = os.path.join(self.prompt_dir, "outcome_prompt.txt")
+        # with open(file_path) as f :
+        #     prompt = f.read()
 
-        prompt = re.sub(r"{task}", task, prompt)
+        prompt = re.sub(r"{task}", task, self.outcome_prompt)
         prompt = re.sub(r"{plan}", high_level_plan, prompt)
 
         response = self.llm_client.generate(prompt)
@@ -370,14 +361,13 @@ class PolicyLLMPlanner(Policy):
         """
         Generates the low level plan for the robot of a high level plan, its expected outcomes of the given task.
         """
-        file_path = os.path.join(self.prompt_dir, "low_level_prompt.txt")
-        with open(file_path) as f :
-            prompt = f.read()
+        # file_path = os.path.join(self.prompt_dir, "low_level_prompt.txt")
+        # with open(file_path) as f :
+        #     prompt = f.read()
 
-        prompt = re.sub(r"{task}", task, prompt)
+        prompt = re.sub(r"{task}", task, self.low_level_prompt)
         prompt = re.sub(r"{plan}", high_level_plan, prompt)
         prompt = re.sub(r"{EO}", expected_outcomes, prompt)
-        # TODO add skills to come from the LTM for the prompt 
 
         response = self.llm_client.generate(prompt)
 

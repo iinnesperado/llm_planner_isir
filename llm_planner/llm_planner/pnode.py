@@ -15,7 +15,7 @@ class SemanticPNode(PNode):
         :param target_object: equiv to "target_object is on the table/ my hand"
         :param is_grasped: makes reference if the Pnode is gonna be "table" or "grasper" type, as in it has the object on its hand or not
         """
-        space = SemanticSpace(target_object=target_object, is_grasped=is_grasped)
+        space = SemanticSpace(target_object=target_object, is_grasped=is_grasped, ident=name+ " space")
         super().__init__(name, class_name, space=space, **params)
 
         self.target_object = target_object
@@ -63,7 +63,7 @@ class SemanticPNode(PNode):
     
     def read_activation_callback(self, msg : PerceptionStamped):
         perception_dict = perception_msg_to_dict(msg=msg.perception)
-        self.get_logger().debug(f"Reading perception ...")
+        # self.get_logger().debug(f"Reading perception ...")
 
         if len(perception_dict)>1:
             self.get_logger().error(f'{self.name} -- Received perception with multiple sensors: ({perception_dict.keys()}). Perception nodes should (currently) include only one sensor!')

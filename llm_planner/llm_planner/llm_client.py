@@ -5,7 +5,7 @@ import ollama
 class LLMClient:
     """LLM Client class. Manages the setup of the LLM and pure generation of plan framework."""
     
-    def __init__(self, model_name="llama3.2", host="http://localhost:11434"):
+    def __init__(self, model_name="qwen3:4b", host="http://localhost:11434"):
         self.model_name = model_name
         self.host = host
         self._load_model()

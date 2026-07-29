@@ -2,7 +2,7 @@ import os
 from glob import glob
 from setuptools import find_packages, setup
 
-package_name = 'llm_planner'
+package_name = 'franka_emdb'
 
 setup(
     name=package_name,
@@ -12,17 +12,18 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        (   os.path.join('share', package_name, 'prompts'), glob('prompts/*.[yma]*')),
+        # (   os.path.join('share', package_name, 'config'), glob('config/*.[png]*')),
     ],
-    install_requires=['setuptools', 'pyyaml', 'numpy'],
+    install_requires=['setuptools'],
     zip_safe=True,
     maintainer='ines',
     maintainer_email='ruizplovin@isir.upmc.fr',
-    description='LLM-based planning with Expected Outcomes Framework for robotic manipulation tasks',
+    description='TODO: Package description',
     license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'test_node = franka_emdb.test:main',
         ],
     },
 )

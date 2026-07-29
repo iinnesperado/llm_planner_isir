@@ -1,0 +1,6 @@
+geometry_msgs/TransformStamped[]    w_h_objs        # objs poses in world frame
+string[]                            labels          # objects labels
+std_msgs/Float32MultiArray          scores          # pose scores 
+string                              target_location 
+---
+bool                                success         # indicate successful run of triggered service
