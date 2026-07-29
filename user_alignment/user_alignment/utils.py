@@ -85,7 +85,7 @@ The visible objects are: IMAGE_PLACEHOLDER.
 The user gave the following corrections in prior trials: RAG_PLACEHOLDER
 
 #OUTPUT
-Your job is output a pick-and-place action to tidy up the desk. Complete the following template: 'Put the (object) in the (location). It is currently at the home position.'
+Your job is output a pick-and-place action to tidy up the desk. Complete the following template: 'Put the (object) in the (location)'
 
 Do not describe how to move or grasp — keep it abstract and human-level.  
 Do not include explanations or justifications — only output the task.
@@ -105,7 +105,7 @@ def get_draft(rag : str, image) -> str:
         A string containing the draft plan
     """
 
-    print(rag)
+    print("Rag: ", rag)
     
     rep = os.path.abspath(os.path.join(os.path.dirname(__file__), "../config"))
     os.makedirs(rep, exist_ok=True)
@@ -122,7 +122,7 @@ def ros_img_to_base64(ros_img):
     to be sent to Ollama vision.
     """
     bridge = CvBridge()
-    cv_image = bridge.imgmsg_to_cv2(ros_img, desired_encoding="bgr8") #to match with camera encoding from sim
+    cv_image = bridge.imgmsg_to_cv2(ros_img, desired_encoding="passthrough") #to match with camera encoding from sim
 
     success, buffer = cv2.imencode('.jpeg', cv_image)
     if not success:

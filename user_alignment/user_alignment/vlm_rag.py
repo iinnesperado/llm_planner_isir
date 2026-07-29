@@ -7,6 +7,7 @@ import ast
 import numpy as np
 from user_alignment.utils import get_useful_doc, get_draft
 
+# For testing independently
 # from utils import get_useful_doc, get_draft
 
 
@@ -22,9 +23,10 @@ class VLMRAG():
 
         # Generate a vision response for the image
         self.prompt_vlm = """
-        You're a robot assistant. Please look at the image and describe each object on the table simply. Ignore the table, any robot arms. Only describe the objects that are on the table.
-        Identify and list **all** visible objects **on the table**. Return the result as a valid Python list of strings.
-        If the table is empty, return None.
+        You are a robot assistant. 
+        Please look at the image and describe in two to three words one object that you see on the table, ignoring the table and any robot arms. 
+        Output the description as a python-like list. The item on the list will be a string corresponding to the description. 
+        Return only the list and ouput no other text.
         """
 
     def infer(self, image_path):
@@ -33,7 +35,7 @@ class VLMRAG():
         """
         
         ###
-        #Get image description (object list) from the VLM
+        # Get image description (object list) from the VLM
         # response = ollama.generate(
         #     model='llama3.2-vision',
         #     prompt=self.prompt_vlm,
@@ -86,39 +88,40 @@ class VLMRAG():
 
         #     context.append({'role':'assistant','content':response})
 
-        #     corrections = []
+            # corrections = []
 
-        #     id_coll = 0
-        #     info = input("Add an information for the model to correct the plan: ") #Accept user feedback
-        #     corrections.append(info)
-
-        #     context.append({'role':'user','content':info})
-          
-        #     if info != 'ok': #If the info is a correction, add it to the database #TODO: embed object id instead to robustify comparison?
-        #         emb = ollama.embed(model="mxbai-embed-large", input=info)
-        #         embeddings = emb["embeddings"]
-        #         self.collection.add(
-        #             ids=[str(id_coll)],
-        #             embeddings=embeddings,
-        #             documents=[info]
-        #         )
-        #         id_coll += 1
-
-        #     docs = get_useful_doc(self.collection, obj, 0.5)
-        #     print(f"Useful documents for the task: {docs}")
-        #     prompt = f"User feedback: {info}. Please update the proposed action."#get_draft(docs, obj)
-
-        #     response = ollama.chat('qwen3:4b',context) #TODO: check this, verify context building, add data saving (ideally with tool)
-
-        #     response = re.sub(r'<think>.*?</think>\s*', '', response.message.content, flags=re.DOTALL)
-        #     print(f"Response from the model after adding: {response}")
+            # id_coll = 0
+            # info = input("Add an information for the model to correct the plan (if the proposition is good type 'ok'): ") #Accept user feedback
             
-        #     return(self.obj, response) #Return object and action
+          
+            # if info != 'ok': #If the info is a correction, add it to the database #TODO: embed object id instead to robustify comparison?
+            #     corrections.append(info)
+            #     context.append({'role':'user','content':info})
+
+            #     emb = ollama.embed(model="mxbai-embed-large", input=info)
+            #     embeddings = emb["embeddings"]
+            #     self.collection.add(
+            #         ids=[str(id_coll)],
+            #         embeddings=embeddings,
+            #         documents=[info]
+            #     )
+            #     id_coll += 1
+
+            #     docs = get_useful_doc(self.collection, obj, 0.5)
+            #     print(f"Useful documents for the task: {docs}")
+            #     prompt = f"User feedback: {info}. Please update the proposed action."#get_draft(docs, obj)
+
+            #     response = ollama.chat('qwen3:4b',context) #TODO: check this, verify context building, add data saving (ideally with tool)
+
+            #     response = re.sub(r'<think>.*?</think>\s*', '', response.message.content, flags=re.DOTALL)
+            #     print(f"Response from the model after adding: {response}")
+            
+            # return(self.obj, response) #Return object and action
         return ('mug', 'Put the mug on top of the shelf')
 
 if __name__=='__main__':
     vlm = VLMRAG()
 
-    object, action = vlm.infer('src/wp5_gii/llm_planner_isir/workstation_simulator/workstation_simulator/config/mug_on_table.png')
+    object, action = vlm.infer('src/wp5_gii/llm_planner_isir/workstation_simulator/workstation_simulator/config/mug_on_table.jpeg')
 
     print(f"Results -- object: {object}, and action: {action}")
