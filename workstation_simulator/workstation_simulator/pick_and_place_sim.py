@@ -216,6 +216,42 @@ class PickAndPlaceSim(Node):
         """
         return True
 
+    def grasp_object(self, obj_id, subpart):
+            """Grasp an object if it's visible at current location"""
+            if obj_id in self.visible_objects:
+                self.grasped_object = obj_id
+                if subpart in self.visible_objects[obj_id].get("subparts"):
+                    self.grasped_part = subpart
+                else:
+                    self.get_logger().error(f"Subpart {subpart} is not defined for object {obj_id}.")
+                    return False
+                
+                self.objects[obj_id]["location"] = "in_hand"
+                self.visible_objects.pop(obj_id)  # Remove from visible
+                self.perceptions["grasped_object"].data = obj_id
+    
+                self.publish_perceptions()
+                return True
+            else:
+                self.get_logger().error(f"Object {obj_id} is not on the table and thus cannot be picked.")
+            return False 
+
+    def release_object(self, location):
+            """Place currently grasped object at location"""
+            if self.grasped_object:
+                self.objects[self.grasped_object]['location'] = location
+                
+                self.grasped_object = None
+                self.grasped_part = None
+                self.perceptions["grasped_object"].data = "None"
+    
+                self.publish_perceptions()
+                return True
+            else :
+                self.get_logger().warning("WARNING - Robot has no object to release !")
+    
+            return False
+
     def grasp_mug_body_policy(self):
         return self.grasp_object('mug', 'body')
 
@@ -227,26 +263,6 @@ class PickAndPlaceSim(Node):
     
     def grasp_scissors_handle_policy(self):
         return self.grasp_object('scissors', 'handle')
-    
-    def grasp_object(self, obj_id, subpart):
-        """Grasp an object if it's visible at current location"""
-        if obj_id in self.visible_objects:
-            self.grasped_object = obj_id
-            if subpart in self.visible_objects[obj_id].get("subparts"):
-                self.grasped_part = subpart
-            else:
-                self.get_logger().error(f"Subpart {subpart} is not defined for object {obj_id}.")
-                return False
-            
-            self.objects[obj_id]["location"] = "in_hand"
-            self.visible_objects.pop(obj_id)  # Remove from visible
-            self.perceptions["grasped_object"].data = obj_id
-
-            self.publish_perceptions()
-            return True
-        else:
-            self.get_logger().error(f"Object {obj_id} is not on the table and thus cannot be picked.")
-        return False 
 
     def release_at_table_policy(self):
         return self.release_object('table')
@@ -259,22 +275,6 @@ class PickAndPlaceSim(Node):
 
     def release_at_toolbox_policy(self):
         return self.release_object('toolbox')
-    
-    def release_object(self, location):
-        """Place currently grasped object at location"""
-        if self.grasped_object:
-            self.objects[self.grasped_object]['location'] = location
-            
-            self.grasped_object = None
-            self.grasped_part = None
-            self.perceptions["grasped_object"].data = "None"
-
-            self.publish_perceptions()
-            return True
-        else :
-            self.get_logger().warning("WARNING - Robot has no object to release !")
-
-        return False
     
     def update_visible_objects(self):
         """Update which objects are visible at current location"""
@@ -352,16 +352,14 @@ class PickAndPlaceSim(Node):
         self.get_logger().info("Executing policy " + str(request.policy))
         self.get_logger().info(f"ITERATION: {self.iteration}")
 
-        self.get_logger().info(f"OBJECTS BEFORE POLICY: {self.objects}")
-        self.get_logger().info(f"GRASPED OBJECT BEFORE: ({self.grasped_object}, {self.grasped_part})")
-        self.get_logger().info(f"PERCEPTIONS BEFORE: {self.perceptions}")
+        self.get_logger().info(f"OBJECTS BEFORE POLICY: {self.perceptions['objects']}")
+        self.get_logger().info(f"GRASPED OBJECT BEFORE: {self.perceptions['grasped_object']}")
         self.get_logger().info(f"POLICY TO EXECUTE: {request.policy}")
 
         success = getattr(self, request.policy + "_policy")()
 
-        self.get_logger().info(f"OBJECTS AFTER POLICY: {self.objects}")
-        self.get_logger().info(f"GRASPED OBJECT AFTER: ({self.grasped_object}, {self.grasped_part})")
-        self.get_logger().info(f"PERCEPTIONS AFTER: {self.perceptions}")
+        self.get_logger().info(f"OBJECTS AFTER POLICY: {self.perceptions['objects']}")
+        self.get_logger().info(f"GRASPED OBJECT AFTER: {self.perceptions['grasped_object']}")
 
         if not success :
             self.get_logger().error("Policy execution unsuccessful! Shutting dowm simulator...")

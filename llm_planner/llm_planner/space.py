@@ -31,7 +31,6 @@ class SemanticSpace(PointBasedSpace):
         elif not self.is_grasped:
             objects_list = [obj['name'] for obj in perception['objects']]
             if self.target_object in objects_list:
-                # return 0.7
-                return 1.0
+                return 0.85
 
         return 0.0

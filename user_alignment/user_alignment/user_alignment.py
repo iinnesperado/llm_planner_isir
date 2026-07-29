@@ -55,8 +55,9 @@ class PolicyUserAlignment(Policy):
         self.vlm_client = VLMRAG()
 
         self.perception_sub = {}
-
         self.configure_perception()
+
+        self.goals_to_plan = []     # list of tuple (goal_name, target_object) that need planning
 
         self.get_action_service = self.create_service(
             GetAlignmentInformation, 
@@ -64,10 +65,6 @@ class PolicyUserAlignment(Policy):
             self.get_alignment_information_callback, 
             callback_group=self.cbgroup_server
         )
-
-        self.object = None
-        self.pnode = None
-        self.goal = None
 
     async def execute_callback(self, request, response):
         """
@@ -78,34 +75,32 @@ class PolicyUserAlignment(Policy):
 
         perception_dict = perception_msg_to_dict(request.perception)
 
-        # raise NotImplementedError
         if self.perception_sub['robot_vision']['updated']:
             self.perception_sub['robot_vision']['updated'] = False
 
             self.get_logger().info("Querying Ollama vision ...")
             raw_vision = self.perception_sub['robot_vision']['data']
             encoded_vision = ros_img_to_base64(raw_vision)
-            object, action = self.vlm_client.infer(encoded_vision)
+            vlm_inference = self.vlm_client.infer(encoded_vision)
+            (obj_name, action) = vlm_inference
+            obj_name = re.sub(" ", "_", obj_name)
             action = re.sub(" ", "_", action)
-            self.get_logger().info(f"Result -- object: {object}, action: {action}")
-            self.object = object
+            self.get_logger().info(f"Result -- object: {obj_name}, action: {action}")
 
-            pnode_name = object + "_object_pnode"
+            pnode_name = obj_name + "__object_pnode"
             grasped_object = perception_dict['grasped_object'][0]
             if (grasped_object['data'] == "None") or (grasped_object['data'] == ""):
                 is_grasped = False
             else : 
                 is_grasped = True
-            pnode_params = {'target_object': object, 'is_grasped': is_grasped} 
+            pnode_params = {'target_object': obj_name, 'is_grasped': is_grasped} 
             await self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPNode", pnode_params)
-            self.pnode = pnode_name
 
-            goal_name = action + "_goal"
+            goal_name = action + "__goal"
             goal_params = {"neighbors": [{"name": "object_in_place_drive", "node_type": "Drive"}]}
             await self.create_node_client(goal_name, "dummy_nodes.dummy_goal.GoalDummy", goal_params)
-            self.goal = goal_name
 
-            cnode_name = object + "__" + action + "__cnode"
+            cnode_name = obj_name + "__" + action + "__cnode"
             neighbor_dict = {"PICK_AND_PLACE": "WorldModel", pnode_name: "PNode", goal_name: "Goal"}
             cnode_params = {
                 'neighbors': [{'name': node, 'node_type': node_type} for node, node_type in neighbor_dict.items()]
@@ -116,6 +111,7 @@ class PolicyUserAlignment(Policy):
             if not success.success:
                 self.get_logger().error(f"ERROR Planner Policy has not been linked to created CNode {cnode_name}")
 
+        self.goals_to_plan.append((goal_name, obj_name))
 
         response.policy = self.name
         self.get_logger().info(f"Policy {self.name} executed successfully.")
@@ -126,10 +122,13 @@ class PolicyUserAlignment(Policy):
         """
         Subscription to the perception topic 'robot_vision'.
         Information used for the VLM queries.
+
+        For robot testing we subscribe to topic 'camera/rgb'.
         """
         subscriber = self.create_subscription(
             Image,
-            "/simulator/sensor/robot_vision",
+            # "/camera/rgb", # for robot deployment
+            "/simulator/sensor/robot_vision", # for fake sim testing
             self.perception_callback,
             1,
             callback_group=self.cbgroup_server
@@ -167,7 +166,10 @@ class PolicyUserAlignment(Policy):
         return response
 
     def get_alignment_information_callback(self, request, response):
-        response.goal = self.goal
-        response.target_object = self.object
-        response.pnode_name = self.pnode
+        """
+        Callback to give the goal and associated target object in queue to be planned.
+        """
+        goal_name, target_object = self.goals_to_plan.pop(0)
+        response.target_object = target_object
+        response.goal_name = goal_name
         return response

@@ -14,9 +14,11 @@ from rclpy.time import Time
 from cognitive_nodes.drive import Drive
 from cognitive_nodes.goal import Goal
 from cognitive_nodes.policy import Policy
+from cognitive_nodes.utils import LTMSubscription
 from core.service_client import ServiceClient, ServiceClientAsync
 from core.utils import class_from_classname
 
+from std_msgs.msg import String
 from core_interfaces.srv import GetNodeFromLTM, CreateNode, UpdateNeighbor, DeleteNode
 from cognitive_node_interfaces.srv import Execute, Predict, GetInformation
 from cognitive_node_interfaces.msg import Episode as EpisodeMsg
@@ -29,7 +31,73 @@ from llm_planner.llm_client import LLMClient # TODO check if the import is right
 from llm_planner.utils import perception_msg_to_dict
 from llm_planner_interfaces.srv import GetTargetObject, GetAlignmentInformation
 
-# NOTE check if drive class should be defined 
+class DriveLLMPlanner(Drive, LTMSubscription):
+    """
+    DriveLLMPlanner Class, responsible to activate the PolicyLLMPlanner when high level goals have not been planned. 
+    """    
+    def __init__(self, name="drive", class_name="cognitive_nodes.drive.Drive", ltm_id=None, **params):
+        """
+        Constructor of the DriveLLMPlanner class.
+
+        :param name: The name of the Drive instance.
+        :type name: str
+        :param class_name: The name of the Drive class, defaults to "cognitive_nodes.drive.Drive".
+        :type class_name: str
+        """        
+        super().__init__(name, class_name, **params)
+        if ltm_id is None:
+            raise Exception('No LTM input was provided.')
+        else:    
+            self.LTM_id = ltm_id
+
+        self.configure_ltm_subscription(self.LTM_id, self.cbgroup_client)
+
+    def read_ltm(self, ltm_dump):
+        """
+        Reads the LTM dump and saves the information on the goals and cnodes.
+        """
+        self.cnode_dict = ltm_dump['CNode']
+        self.goal_dict = ltm_dump['Goal']
+
+    def evaluate(self, perception=None):
+        """
+        Evaluation that returns 0.6 when there is a goal that needs to be planned.
+
+        :param perception: Unused perception.
+        :type perception: dict or Any.
+        :return: Evaluation of the Drive.
+        :rtype: cognitive_node_interfaces.msg.Evaluation
+        """        
+        value = 0.0     # evaluation value for the drive 
+        all_neighbors_goal = []
+
+        for cnode in self.cnode_dict:
+            all_neighbors_goal.append(self.get_neighbor_names(cnode['name']))
+
+        goals_diff = set(self.goal_dict) - set(all_neighbors_goal)
+        if len(goals_diff) > 0:
+            self.get_logger().info(f"The following Goals need a plan: {goals_diff}")
+            value = 0.6
+
+        self.evaluation.evaluation = value
+        self.evaluation.timestamp = self.get_clock().now().to_msg()
+        return self.evaluation
+
+    def get_neighbor_names(self, cnode_name):
+        """
+        This method returns the names of the neighbors (Goal type only) of a CNode.
+
+        :param cnode_name: Name of the CNode.
+        :type cnode_name: str.
+        :return: List of neighbor names.
+        :rtype: list.
+        """        
+        neighbors = self.cnode_dict.get(cnode_name, {}).get("neighbors", [])
+        names = []
+        for neighbor in neighbors:
+            if neighbor['note_type'] == 'Goal':
+                names.append(neighbor['name'])
+        return names
 
 class PolicyLLMPlanner(Policy):
     def __init__(self, name="policy", llm_model_name="llama3.2", ltm_id = None, prompts=[], executed_primitive_service="", **params):
@@ -45,6 +113,7 @@ class PolicyLLMPlanner(Policy):
         self.policies = self.configure_policies()
 
         self.executed_primitive_service = executed_primitive_service
+        self.executed_primitive_type = class_from_classname("cognitive_node_interfaces.srv.Policy")
 
         self.llm_client = LLMClient(model_name=llm_model_name)
         self.high_level_prompt = prompts["high_level_prompt"]
@@ -61,16 +130,16 @@ class PolicyLLMPlanner(Policy):
         # Call get_node service from LTM
         service_name = "/" + str(self.LTM_id) + "/get_node"
         request = ""
-        client = ServiceClient(GetNodeFromLTM, service_name)
-        ltm_response = client.send_request(name=request)
+        client = ServiceClientAsync(self, GetNodeFromLTM, service_name, self.cbgroup_server)
+        ltm_response = client.send_request_async(name=request)
         ltm = yaml.safe_load(ltm_response.data)
         return ltm
     
-    def configure_policies(self):
+    async def configure_policies(self):
         """
         Creates a list of eligible policies to be executed and shuffles it.
         """
-        ltm_cache = self.request_ltm()        
+        ltm_cache = await self.request_ltm()        
         policies = list(ltm_cache["Policy"].keys())
         self.get_logger().info(f"Configuring Policies: {policies}") #TODO: Possibility of using new policies added in LTM
         return policies
@@ -114,62 +183,69 @@ class PolicyLLMPlanner(Policy):
         :type request: cognitive_node_interfaces.srv.Execute.Request
         :param response: The response indicating the executed policy.
         :type response: cognitive_node_interfaces.srv.Execute.Response
-        :raise NotImplementedError: This method should be implemented in subclasses.
         """
         self.get_logger().info(f"== START LLM PLANNER CALLBACK EXECUTE ==")
 
         perception_dict = perception_msg_to_dict(request.perception)
         self.get_logger().info(f"Received perception: {perception_dict}")
 
-        # goal = self.get_high_level_goal_name()
+        alignment_cnode = self.get_cnode_name()
+        # cnode_split = cnode.split("__")
+        # target_object = cnode_split[0]
+        # action = cnode_split[1]
+        # goal_name = action + "__goal"
+        # self.get_logger().info(f"Object name: {target_object}, action: {action}")        
+                
         alignment_response = await self.get_alignment_information()
-        goal = alignment_response.goal
+        goal_name = alignment_response.goal_name
+        action = re.sub(r"__goal", "", goal_name)
+        self.get_logger().info(f"Alignment response {alignment_response}")
 
-        plan = self.resquest_llm_plan(goal)
+
+        plan = self.resquest_llm_plan(goal_name)
         try:
             plan_list = ast.literal_eval(plan)
         except (ValueError, SyntaxError) as e:
             self.get_logger().error(f"Invalid plan returned by LLM: {plan}. Error: {e}")
         self.get_logger().info(f"LLM generated plan: {plan}")
-
-        name = re.sub(r"_goal", "", goal)
-
+    
         for idx, policy in enumerate(plan_list): 
-            self.get_logger().info(f"Working on plan step {idx}: {policy}...")
+            self.get_logger().info(f"Working on plan step {idx+1}: {policy}...")
 
-            if policy not in self.policies:
-                self.get_logger().error("LLM DID NOT RETURN A VALID POLICY. CHOOSING RANDOMLY...")
-                return
+            # if policy not in self.policies:
+            #     self.get_logger().error("LLM DID NOT RETURN A VALID POLICY. CHOOSING RANDOMLY...")
+            #     return
             
+            target_object = alignment_response.target_object
             if idx == 0:
-                # we just add the pnode already created by user alignment 
-                pnode_name = alignment_response.pnode_name
+                # in this case the pnode already created by user alignment is used
+                pnode_name = target_object + "__object_pnode"
             elif self.perception_sub['grasped_object']['updated']:
                 self.get_logger().info("Creating PNode...")
                 self.perception_sub['grasped_object']['updated'] = False
                 
-                target_object = alignment_response.target_object
                 pnode_params = {}
-                # target_object = self.get_pnode_target_object()
                 if (self.perception_sub["grasped_object"]["data"]=="None" or self.perception_sub["grasped_object"]["data"]==""):
                     is_grasped = False
-                    pnode_name = f"{target_object}_object_pnode"
+                    pnode_name = f"{target_object}__object_pnode"
                 else :
                     is_grasped = True
-                    pnode_name = f"grasped_{target_object}_object_pnode"
+                    pnode_name = f"grasped__{target_object}__object_pnode"
                 pnode_params = {"target_object": target_object, "is_grasped": is_grasped}
                 await self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPnode", pnode_params)
             else :
                 self.get_logger().warning("LLMPlanner - perception was not updated, so PNode was not created!")
 
             
-            self.get_logger().info(f"Executing plan step {idx}: {policy}...")
+            self.get_logger().info(f"Executing plan step {idx+1}: {policy}...")
+            if self.executed_primitive_service not in self.node_clients:
+                self.node_clients[self.executed_primitive_service] = ServiceClientAsync(self, self.executed_primitive_type, self.executed_primitive_service, self.cbgroup_client)
             await self.node_clients[self.executed_primitive_service].send_request_async(policy=policy)
             
-            cnode_name = f"{name}_step_{idx}_cnode"
+            cnode_name = f"{action}__step_{idx+1}_cnode"
             neighbors = [
                 {"name": "PICK_AND_PLACE", "node_type": "WorldModel"},
-                {"name": goal, "node_type": "Goal"},
+                {"name": goal_name, "node_type": "goal_name"},
                 {"name": pnode_name, "node_type": "PNode"},
             ]
             cnode_params = {"neighbors": neighbors}
@@ -184,51 +260,29 @@ class PolicyLLMPlanner(Policy):
 
         response.policy = self.name 
 
-        #NOTE TO REVISE WITH THE NEW DUMMY NODES NETWORK
-        self.delete_cnode_llm_planner()
+        await self.my_delete_node(alignment_cnode)
         await self.delete_neighbor_client(self.name, self.get_cnode_name())
 
         self.get_logger().info(f"Policy {self.name} executed successfully.")
 
         return response
-
-    async def delete_cnode_llm_planner(self):
-        """Responsible of deleting the cnode that is responsible of the call for the llm planner the whole plan has been executed."""
-        cnode = self.get_cnode_name()
-        deleted = await self.delete_node_client(cnode)
-
-        self.get_logger().info(f"Deletation of cnode llm_planner was successful: {deleted}")
-
-        return deleted
     
-    def delete_node_client(self, name):
+    def my_delete_node(self, name):
         self.get_logged().info("Requesting node deletion")
         service_name = "commander/delete"
         if service_name not in self.node_clients:
             self.node_clients[service_name] = ServiceClientAsync(self, DeleteNode, service_name, self.cbgroup_client)
         response=self.node_clients[service_name].send_request_async(name=name)
-        return response.deleted
+        return response
 
-    async def get_cnode_name(self):
+    def get_cnode_name(self):
         """
         Retrives the name of the Cnode calling the policy LLM Planner.
         We suppose that the policy LLM Planner has the cnode that calls for him as a neighbor.
         """
-        # ltm_cache = self.request_ltm()
-        # data = next((nodes_dict[self.name] for nodes_dict in ltm_cache.values() if self.name in nodes_dict))
-        # neighbors = data['neighbors']
 
-        # for node in neighbors:
-        #     if node['node_type'] == 'CNode':
-        #         cnode_name = node['name']
-
-
-        service_name = "cognitive_node/" + str(self.name) + "/get_information"
-        if service_name not in self.node_clients:
-            self.node_clients[service_name] = ServiceClientAsync(self, GetInformation, service_name, self.cbgroup_server)
-        response = await self.node_clients[service_name].send_request_async()
-        neighbors_name = response.neighbors_name
-        neighbors_type = response.neighbors_type
+        neighbors_name = [node['name'] for node in self.neighbors]
+        neighbors_type = [node['node_type'] for node in self.neighbors]
 
         for i, node_type in enumerate(neighbors_type):
             if node_type == "CNode":
@@ -236,62 +290,15 @@ class PolicyLLMPlanner(Policy):
         
         return None
 
-    # def get_high_level_goal_name(self):
-    #     """Retrieves the high level goal of the cnode calling the policy LLM Planner."""
-    #     goal = None
-    #     ltm_cache = self.request_ltm()
-    #     cnode_name = self.get_cnode_name()
-
-    #     if cnode_name is None:
-    #         self.get_logger().error("ERROR LLM Planner doesn't have a Cnode as neighbor")
-    #     else :
-    #         data = next((nodes_dict[cnode_name] for nodes_dict in ltm_cache.values() if cnode_name in nodes_dict))
-    #         neighbors = data['neighbors']
-
-    #         for node in neighbors:
-    #             if node['node_type'] == 'Goal':
-    #                 goal = node['name']
-
-    #         self.get_logger().info(f"GOAL of the LLMPlanner : {goal}")
-        
-    #     return goal
-    
-    # async def get_pnode_target_object(self, pnode_name):
-    #     """
-    #     Retrieves the target_object from the pnode neighboor of the cnode calling this policy.
-    #     """
-    #     pnode_name = None
-    #     ltm_cache = self.request_ltm()
-    #     cnode_name = self.get_cnode_name()
-
-    #     if cnode_name is None:
-    #         self.get_logger().error("ERROR LLM Planner doesn't have a Cnode as neighbor")
-    #     else :
-    #         data = next((nodes_dict[cnode_name] for nodes_dict in ltm_cache.values() if cnode_name in nodes_dict))
-    #         neighbors = data['neighbors']
-
-    #         for node in neighbors:
-    #             if node['node_type'] == 'PNode':
-    #                 pnode_name = node['name']
-
-    #     self.get_logger().info("Requesting target object to PNode...")
-    #     service_name = "pnode/" + str(pnode_name) + "get_target_object"
-    #     if service_name not in self.node_clients:
-    #         self.node_clients[service_name] = ServiceClientAsync(self, GetTargetObject, service_name, self.cbgroup_server)
-    #     response = await self.node_clients[service_name].send_request_async()
-    #     return response.target_object
-
     def get_alignment_information(self):
         """
         Get the objetc, goal, pnode name information from the User Alignment policy.
         """
         service_name = "user_alignment/get_alignment_information"
         if service_name not in self.node_clients:
-            self.node_clients[service_name] = ServiceClientAsync(self, GetAlignmentInformation, service_name, self.cbgroup_server)
+            self.node_clients[service_name] = ServiceClientAsync(self, GetAlignmentInformation, service_name, self.cbgroup_client)
         response = self.node_clients[service_name].send_request_async()
         return  response
-
-    
 
 
 
