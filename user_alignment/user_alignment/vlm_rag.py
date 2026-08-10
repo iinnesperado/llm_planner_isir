@@ -24,69 +24,73 @@ class VLMRAG():
         # Generate a vision response for the image
         self.prompt_vlm = """
         You are a robot assistant. 
-        Please look at the image and describe in two to three words one object that you see on the table, ignoring the table and any robot arms. 
+        Please look at the image and describe in one or two word one object that you see on the table, ignoring the table and any robot arms. 
         Output the description as a python-like list. The item on the list will be a string corresponding to the description. 
         Return only the list and ouput no other text.
         """
 
-    def infer(self, image_path):
+    def infer(self, image_path, quick_test=True):
         """
         Generate a vision response for the image.
         """
+
+        if quick_test:
+            # vlm takes quite some time to query 
+            return ('mug', 'Put the mug in the tray')
         
         ###
         # Get image description (object list) from the VLM
-        # response = ollama.generate(
-        #     model='llama3.2-vision',
-        #     prompt=self.prompt_vlm,
-        #     images=[image_path],
-        #     options={
-        #         "temperature": 0.0,
-        #         "num_predict": 1024
-        #     }
-        # )
+        response = ollama.generate(
+            model='llama3.2-vision',
+            prompt=self.prompt_vlm,
+            images=[image_path],
+            options={
+                "temperature": 0.0,
+                "num_predict": 1024
+            }
+        )
 
-        # final_res = []
+        final_res = []
     
-        # im_desc = response.get("response", "")
+        im_desc = response.get("response", "")
         
-        # if im_desc[:4] == 'None':
-        #     return(None, None)
+        if im_desc[:4] == 'None':
+            return(None, None)
         
-        # print(f"Image description: {im_desc}")
-        # match = re.search(r'\[\s*.*?\s*\]', im_desc, re.DOTALL)
-        # obj_list = []
-        # if match:
-        #     obj_list_str = match.group(0)
-        #     obj_list = ast.literal_eval(obj_list_str)  #
-        #     print(f"Extracted object list: {obj_list}")
-        #     self.obj = obj_list[0]
-        # else:
-        #     print("List not found")
+        print(f"Image description: {im_desc}")
+        match = re.search(r'\[\s*.*?\s*\]', im_desc, re.DOTALL)
+        obj_list = []
+        if match:
+            obj_list_str = match.group(0)
+            obj_list = ast.literal_eval(obj_list_str)  #
+            print(f"Extracted object list: {obj_list}")
+            self.obj = obj_list[0]
+        else:
+            print("List not found")
             
-        # ###
-        # #Get the suggested action for the first object in the list (the action will be returned at the end, rendering the for loop useless. It can be changed to a print or other to get all the suggested actions.
+        ###
+        #Get the suggested action for the first object in the list (the action will be returned at the end, rendering the for loop useless. It can be changed to a print or other to get all the suggested actions.
 
-        # for obj in obj_list:
+        for obj in obj_list:
 
-        #     context = []
-        #     print('Collection: ', self.collection) #Display available corrections
-        #     docs = get_useful_doc(self.collection,obj)
-        #     print('Docs: ', docs) #Display selected correction
-        #     prompt = get_draft(docs, obj)
+            context = []
+            print('Collection: ', self.collection) #Display available corrections
+            docs = get_useful_doc(self.collection,obj)
+            print('Docs: ', docs) #Display selected correction
+            prompt = get_draft(docs, obj)
 
-        #     context.append({'role':'user','content':prompt})
+            context.append({'role':'user','content':prompt})
             
-        #     start_time = time.time()
-        #     response = ollama.generate(
-        #         model='qwen3:4b',
-        #         prompt=prompt
-        #     )
+            start_time = time.time()
+            response = ollama.generate(
+                model='qwen3:4b',
+                prompt=prompt
+            )
             
-        #     response = re.sub(r'<think>.*?</think>\s*', '', response.get('response', ''), flags=re.DOTALL)
-        #     print(f"Response from the model: {response}") #Display initial object suggection
+            response = re.sub(r'<think>.*?</think>\s*', '', response.get('response', ''), flags=re.DOTALL)
+            print(f"Response from the model: {response}") #Display initial object suggection
 
-        #     context.append({'role':'assistant','content':response})
+            # context.append({'role':'assistant','content':response})
 
             # corrections = []
 
@@ -116,8 +120,7 @@ class VLMRAG():
             #     response = re.sub(r'<think>.*?</think>\s*', '', response.message.content, flags=re.DOTALL)
             #     print(f"Response from the model after adding: {response}")
             
-            # return(self.obj, response) #Return object and action
-        return ('mug', 'Put the mug on top of the shelf')
+            return(self.obj, response) #Return object and action
 
 if __name__=='__main__':
     vlm = VLMRAG()

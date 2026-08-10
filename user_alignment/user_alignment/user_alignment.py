@@ -82,6 +82,7 @@ class PolicyUserAlignment(Policy):
             raw_vision = self.perception_sub['robot_vision']['data']
             encoded_vision = ros_img_to_base64(raw_vision)
             vlm_inference = self.vlm_client.infer(encoded_vision)
+
             (obj_name, action) = vlm_inference
             obj_name = re.sub(" ", "_", obj_name)
             action = re.sub(" ", "_", action)
@@ -105,30 +106,34 @@ class PolicyUserAlignment(Policy):
             cnode_params = {
                 'neighbors': [{'name': node, 'node_type': node_type} for node, node_type in neighbor_dict.items()]
             }
-            await self.create_node_client(cnode_name, "cognitive_nodes.cnode.CNode", cnode_params)
+            # await self.create_node_client(cnode_name, "cognitive_nodes.cnode.CNode", cnode_params)
 
-            success = await self.add_neighbor_client("llm_planner_policy", cnode_name)
-            if not success.success:
-                self.get_logger().error(f"ERROR Planner Policy has not been linked to created CNode {cnode_name}")
+            # success = await self.add_neighbor_client("llm_planner_policy", cnode_name)
+            # if not success.success:
+            #     self.get_logger().error(f"ERROR Planner Policy has not been linked to created CNode {cnode_name}")
 
-        self.goals_to_plan.append((goal_name, obj_name))
+            self.goals_to_plan.append((goal_name, obj_name))
 
         response.policy = self.name
         self.get_logger().info(f"Policy {self.name} executed successfully.")
 
         return response
 
-    def configure_perception(self):
+    def configure_perception(self, robot_deployment=False):
         """
         Subscription to the perception topic 'robot_vision'.
         Information used for the VLM queries.
 
         For robot testing we subscribe to topic 'camera/rgb'.
         """
+        if robot_deployment:
+            service_name = "/camera/rgb"
+        else :
+            service_name = "/simulator/sensor/robot_vision"
+
         subscriber = self.create_subscription(
             Image,
-            # "/camera/rgb", # for robot deployment
-            "/simulator/sensor/robot_vision", # for fake sim testing
+            service_name,
             self.perception_callback,
             1,
             callback_group=self.cbgroup_server

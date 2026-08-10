@@ -16,7 +16,7 @@ from core.utils import class_from_classname
 from llm_planner_interfaces.srv import GraspObject, ReleaseObject
 from user_alignment.utils import png_to_ros_img
 
-from custom_interfaces.srv import GraspAndReleaseRequest, GraspRequest
+from custom_interfaces.srv import GraspRequest
 
 
 
@@ -39,12 +39,12 @@ class FrankaMDB(Node):
         self.visible_objects = {}
         self.object_to_pick = None      # string
         self.grasped_object = None      # check if the robot has already an object
-        self.grasped_part = None
         
         # Callback groups for concurrency
         self.cbgroup_server=MutuallyExclusiveCallbackGroup()
         self.cbgroup_client=MutuallyExclusiveCallbackGroup()
 
+        # Franka primitives services
         self.grasp_request_client = ServiceClientAsync(self, GraspRequest, "app/grasp/spin", self.cbgroup_client)
         
         self.load_client=ServiceClient(LoadConfig, 'commander/load_experiment')
@@ -70,7 +70,7 @@ class FrankaMDB(Node):
                 # Be ware, we can not subscribe to control channel before creating all sensor publishers.
                 self.setup_control_channel(config["Control"])
 
-                # self.setup_objects(config["DiscreteEventSimulator"]["Objects"])
+                self.setup_objects(config["DiscreteEventSimulator"]["Objects"])
 
         self.load_experiment_file_in_commander()
 
@@ -95,7 +95,7 @@ class FrankaMDB(Node):
             elif "String" in classname:
                 self.perceptions[sid].data = ""
             elif "Image" in classname:
-                self.perceptions[sid] = "TODO"
+                self.perceptions[sid] = self.setup_camera_img
                 
             self.get_logger().info("I will publish " + str(sid) + " to... " + str(topic))
             self.sim_publishers[sid] = self.create_publisher(message, topic, 0)
@@ -104,15 +104,19 @@ class FrankaMDB(Node):
 
     def setup_camera_img(self):
         """
-        Could be used to setup perception camera
+        Sets up the static image to be published during the simulation.
+        Only used for testing wihout a camera in simulator.
+        NOTE not needed for robot deployment
         """
-        raise NotImplementedError
+        img_msg = png_to_ros_img("build/workstation_simulator/workstation_simulator/config/mug_on_table.jpeg")
+        img_msg.header.stamp = self.get_clock().now().to_msg()
 
+        return img_msg
     
     def setup_control_channel(self, simulation):
         """
         Configure the ROS topic/service where listen for commands to be executed.
-        TODO needs to be adapted
+        TODO needs to be adapted for redescription module
 
         :param simulation: The params from the config file to setup the control channel.
         :type simulation: dict
@@ -132,23 +136,22 @@ class FrankaMDB(Node):
             message_policy_srv = class_from_classname(classname)
             self.create_service(message_policy_srv, service_policy, self.policy_service, callback_group=self.cbgroup_server)
             self.get_logger().info("Creating perception publisher timer... ")
-            # self.perceptions_timer = self.create_timer(0.01, self.publish_perceptions, callback_group=self.cbgroup_server)
+            self.perceptions_timer = self.create_timer(0.01, self.publish_perceptions, callback_group=self.cbgroup_server)
 
         if service_world_reset:
             self.message_world_reset = class_from_classname(simulation["world_reset_msg"])
             self.create_service(self.message_world_reset, service_world_reset, self.world_reset_service_callback, callback_group=self.cbgroup_server)
     
-    # def setup_objects(self, objects):
-    #     for obj in objects:
-    #         self.objects[obj['id']] = dict(subparts=obj['subparts'], location=obj['location'], home=obj['home'])
+    def setup_objects(self, objects):
+        for obj in objects:
+            self.objects[obj['id']] = dict(location=obj['location'], home=obj['home'])
             
-    #         data = self.base_messages["objects"]()
-    #         data.name = obj["id"]
-    #         data.subparts = deepcopy(obj["subparts"])
-    #         data.location = obj["location"]
-    #         self.perceptions["objects"].data.append(data)
+            data = self.base_messages["objects"]()
+            data.name = obj["id"]
+            data.location = obj["location"]
+            self.perceptions["objects"].data.append(data)
 
-    #     self.get_logger().debug(f"Object list setup finished : {self.objects} and {self.perceptions}")
+        self.get_logger().debug(f"Object list setup finished : {self.objects} and {self.perceptions}")
     
     def load_experiment_file_in_commander(self):
         """
@@ -204,64 +207,21 @@ class FrankaMDB(Node):
         An object is pickable if it's visible. For the moment that means it is everything.
         """
         return True
-    
-    # def grasp_object(self, obj_id, subpart=None):
-    #     """Grasp an object if it's visible at current location"""
-    #     if obj_id in self.visible_objects:
-    #         self.grasped_object = obj_id
-    #         # if subpart in self.visible_objects[obj_id].get("subparts"):
-    #         #     self.grasped_part = subpart
-    #         # else:
-    #         #     self.get_logger().error(f"Subpart {subpart} is not defined for object {obj_id}.")
-    #         #     return False
-            
-    #         self.objects[obj_id]["location"] = "in_hand"
-    #         self.visible_objects.pop(obj_id)  # Remove from visible
-    #         self.perceptions["grasped_object"].data = obj_id
 
-    #         self.publish_perceptions()
-    #         return True
-    #     else:
-    #         self.get_logger().error(f"Object {obj_id} is not on the table and thus cannot be picked.")
-    #     return False 
-    
-    # def release_object(self, location):
-    #     """Place currently grasped object at location"""
-    #     if self.grasped_object:
-    #         self.objects[self.grasped_object]['location'] = location
-            
-    #         self.grasped_object = None
-    #         self.grasped_part = None
-    #         self.perceptions["grasped_object"].data = "None"
-
-    #         self.publish_perceptions()
-    #         return True
-    #     else :
-    #         self.get_logger().warning("WARNING - Robot has no object to release !")
-
-    #     return False
-
-    async def grasp_request_client(self, target_object, target_location):
+    def grasp_object_policy(self, target_object, target_location):
         """
         Policy to grasp and release an object at the given location.
         """
-        # TODO problem on how do we get the params
-        response = await self.grasp_request_client.send_request_async(target_objects=target_object, target_location=target_location)
+        response = self.grasp_request_client.send_request_async(target_objects=target_object, target_location=target_location)
+        return response
 
+    def place_object_policy(self, location):
+        """
+        Policy to release and place the object in the given location.
 
-    
-    # def grasp_mug_policy(self):
-    #     return self.grasp_object('mug', 'body')
-
-    # def grasp_screwdriver_policy(self):
-    #     return self.grasp_object('screwdriver', 'handle')
-
-    # def grasp_banana_policy(self):
-    #     return self.grasp_object('banana', 'body')
-    
-    # def grasp_scissors_policy(self):
-    #     return self.grasp_object('scissors', 'handle')
-
+        NOTE this might be needed bc of planner issues
+        """
+        raise NotImplementedError
     
     def update_visible_objects(self):
         """Update which objects are visible at current location"""
@@ -296,35 +256,34 @@ class FrankaMDB(Node):
     def reset_world(self, data):
         """
         This method initializes the world. Moves the robot to home position.
-        TODO needs to be updated
+        TODO needs to be updated for redescription module
         """
         self.get_logger().debug(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
         # Reset robot to inital state
         self.grasped_object = None
-        self.grasped_part = None
 
         # Reinitialize objects
         self.reset_perceptions()
         self.update_visible_objects()
-        # self.publish_perceptions()
+        self.publish_perceptions()
         self.get_logger().debug(f"DEBUG: WORLD RESET NEW: {self.perceptions}")
 
     def world_reset_service_callback(self, request, response):
         """
         Callback for the world reset service 
-        TODO Needs to be updated
+        TODO Needs to be updated for redescription module ?
         """
         self.reset_world(request)
         response.success = True
         return response
     
-    # def reset_perceptions(self):
-    #     """
-    #     Puts all the objects on top of the table. Releases object from gripper
-    #     We consider the location 'table' to be the init location of all objects.
-    #     """
-    #     for _,obj_data in self.objects.items():
-    #         obj_data['location'] = "table"
+    def reset_perceptions(self):
+        """
+        Puts all the objects on top of the table. Releases object from gripper
+        We consider the location 'table' to be the init location of all objects.
+        """
+        for _,obj_data in self.objects.items():
+            obj_data['location'] = "table"
 
     def new_command_callback(self, data):
         """
@@ -342,28 +301,6 @@ class FrankaMDB(Node):
             self.get_logger().info("Ending simulator as requested by LTM...")
             rclpy.shutdown() 
 
-    # def new_action_service_callback(self, request, response):
-    #     """Execute the policy and publish perceptions."""
-    #     self.get_logger().info("Executing policy " + str(request.policy))
-    #     self.get_logger().info(f"ITERATION: {self.iteration}")
-
-    #     self.get_logger().info(f"OBJECTS BEFORE POLICY: {self.objects}")
-    #     self.get_logger().info(f"GRASPED OBJECT BEFORE: ({self.grasped_object}, {self.grasped_part})")
-    #     self.get_logger().info(f"PERCEPTIONS BEFORE: {self.perceptions}")
-    #     self.get_logger().info(f"POLICY TO EXECUTE: {request.policy}")
-
-    #     success = getattr(self, request.policy + "_policy")()
-
-    #     self.get_logger().info(f"OBJECTS AFTER POLICY: {self.objects}")
-    #     self.get_logger().info(f"GRASPED OBJECT AFTER: ({self.grasped_object}, {self.grasped_part})")
-    #     self.get_logger().info(f"PERCEPTIONS AFTER: {self.perceptions}")
-
-    #     if not success :
-    #         self.get_logger().error("Policy execution unsuccessful! Shutting dowm simulator...")
-    #         rclpy.shutdown()
-    #     response.success = True
-    #     return response
-
     async def policy_service(self, request, response):
         """
         Generic method that executes a policy according to a service request.
@@ -376,9 +313,25 @@ class FrankaMDB(Node):
         :rtype: cognitive_node_interfaces.srv.Policy.Response
         """
         self.get_logger().info(f"Executing {request.policy} policy...")
+        self.get_logger().info(f"OBJECTS BEFORE POLICY: {self.perceptions['objects']}")
+        self.get_logger().info(f"GRASPED OBJECT BEFORE: {self.perceptions['grasped_object']}")
 
-        # TODO parse the policy name to get the params for the policy
-        await getattr(self, request.policy + "_policy")()
+        request_policy_split = request.policy.split("__")
+        self.get_logger().info(f"POLICY TO EXECUTE: {request_policy_split}")
+
+        policy_name = request_policy_split.pop(0)
+        if policy_name == 'grasp_object':
+            target_objects = request_policy_split.pop(0)
+            location = request_policy_split.pop(0)
+            # NOTE we can also see if its possible to make it so that it's not a list?
+            params = [[target_objects], location]
+        else :
+            params = request_policy_split
+        await getattr(self, policy_name + "_policy")(*params)
+
+        self.get_logger().info(f"OBJECTS AFTER POLICY: {self.perceptions['objects']}")
+        self.get_logger().info(f"GRASPED OBJECT AFTER: {self.perceptions['grasped_object']}")
+
         response.success = True
         return response
 
