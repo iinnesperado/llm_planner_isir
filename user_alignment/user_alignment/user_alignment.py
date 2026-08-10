@@ -101,17 +101,6 @@ class PolicyUserAlignment(Policy):
             goal_params = {"neighbors": [{"name": "object_in_place_drive", "node_type": "Drive"}]}
             await self.create_node_client(goal_name, "dummy_nodes.dummy_goal.GoalDummy", goal_params)
 
-            cnode_name = obj_name + "__" + action + "__cnode"
-            neighbor_dict = {"PICK_AND_PLACE": "WorldModel", pnode_name: "PNode", goal_name: "Goal"}
-            cnode_params = {
-                'neighbors': [{'name': node, 'node_type': node_type} for node, node_type in neighbor_dict.items()]
-            }
-            # await self.create_node_client(cnode_name, "cognitive_nodes.cnode.CNode", cnode_params)
-
-            # success = await self.add_neighbor_client("llm_planner_policy", cnode_name)
-            # if not success.success:
-            #     self.get_logger().error(f"ERROR Planner Policy has not been linked to created CNode {cnode_name}")
-
             self.goals_to_plan.append((goal_name, obj_name))
 
         response.policy = self.name

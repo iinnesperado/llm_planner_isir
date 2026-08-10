@@ -252,12 +252,10 @@ class PolicyLLMPlanner(Policy):
 
             # CNODE CREATION
             cnode_name = f"{action}__step_{idx+1}_cnode"
-            neighbors = [
-                {"name": "PICK_AND_PLACE", "node_type": "WorldModel"},
-                {"name": goal_name, "node_type": "goal_name"},
-                {"name": pnode_name, "node_type": "PNode"},
-            ]
-            cnode_params = {"neighbors": neighbors}
+            neighbor_dict = {"PICK_AND_PLACE": "WorldModel", pnode_name: "PNode", goal_name: "Goal"}
+            cnode_params = {
+                'neighbors': [{'name': node, 'node_type': node_type} for node, node_type in neighbor_dict.items()]
+            }
             await self.create_node_client(cnode_name, "cognitive_nodes.cnode.CNode", cnode_params)
 
             sucess = await self.add_neighbor_client(policy_name, cnode_name)
@@ -265,9 +263,6 @@ class PolicyLLMPlanner(Policy):
                 self.get_logger().info(f"Successfully added the Cnode {cnode_name} as neighbor to policy {policy_name}")
             else :
                 self.get_logger().error(f"ERROR Failed to link policy {policy_name} to CNode {cnode_name}")
-
-            # await self.delete_neighbor_client(self.name, self.get_cnode_name())
-            # await self.my_delete_node(alignment_cnode)
             
 
         response.policy = self.name 
