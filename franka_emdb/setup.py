@@ -23,7 +23,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'test_node = franka_emdb.test:main',
+            # 'test_node = franka_emdb.test:main',
+            'franka_server = franka_emdb.franka_emdb_server:main',
         ],
     },
 )

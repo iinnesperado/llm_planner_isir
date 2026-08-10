@@ -9,12 +9,14 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rcl_interfaces.msg import ParameterDescriptor
 
 from sensor_msgs.msg import Image
-from core.service_client import ServiceClient
+from core.service_client import ServiceClient, ServiceClientAsync
 from core_interfaces.srv import LoadConfig
 from core.utils import class_from_classname
 
 from llm_planner_interfaces.srv import GraspObject, ReleaseObject
 from user_alignment.utils import png_to_ros_img
+
+from custom_interfaces.srv import GraspRequest
 
 
 
@@ -48,11 +50,12 @@ class PickAndPlaceSim(Node):
         self.visible_objects = {}
         self.object_to_pick = None      # string
         self.grasped_object = None      # check if the robot has already an object
-        self.grasped_part = None
         
         # Callback groups for concurrency
         self.cbgroup_server=MutuallyExclusiveCallbackGroup()
         self.cbgroup_client=MutuallyExclusiveCallbackGroup()
+
+        # self.grasp_request_client = ServiceClientAsync(self, GraspRequest, "app/grasp/spin", self.cbgroup_client)
         
         self.load_client=ServiceClient(LoadConfig, 'commander/load_experiment')
         self.get_logger().info("PickAndPlaceSim initialized")
@@ -115,7 +118,7 @@ class PickAndPlaceSim(Node):
         Sets up the static image to be published during the simulation.
         Only used for testing wihout a camera in simulator.
         """
-        img_msg = png_to_ros_img("build/workstation_simulator/workstation_simulator/config/mug_on_table.jpeg")
+        img_msg = png_to_ros_img("/home/user/ines_ros2_humble/eMDB_ws/build/workstation_simulator/workstation_simulator/config/rgb_002.png")
         img_msg.header.stamp = self.get_clock().now().to_msg()
 
         return img_msg
@@ -151,11 +154,10 @@ class PickAndPlaceSim(Node):
     
     def setup_objects(self, objects):
         for obj in objects:
-            self.objects[obj['id']] = dict(subparts=obj['subparts'], location=obj['location'], home=obj['home'])
+            self.objects[obj['id']] = dict(location=obj['location'], home=obj['home'])
             
             data = self.base_messages["objects"]()
             data.name = obj["id"]
-            data.subparts = deepcopy(obj["subparts"])
             data.location = obj["location"]
             self.perceptions["objects"].data.append(data)
 
@@ -216,16 +218,10 @@ class PickAndPlaceSim(Node):
         """
         return True
 
-    def grasp_object(self, obj_id, subpart):
+    def grasp_object_policy(self, obj_id):
             """Grasp an object if it's visible at current location"""
             if obj_id in self.visible_objects:
-                self.grasped_object = obj_id
-                if subpart in self.visible_objects[obj_id].get("subparts"):
-                    self.grasped_part = subpart
-                else:
-                    self.get_logger().error(f"Subpart {subpart} is not defined for object {obj_id}.")
-                    return False
-                
+                self.grasped_object = obj_id                
                 self.objects[obj_id]["location"] = "in_hand"
                 self.visible_objects.pop(obj_id)  # Remove from visible
                 self.perceptions["grasped_object"].data = obj_id
@@ -236,13 +232,12 @@ class PickAndPlaceSim(Node):
                 self.get_logger().error(f"Object {obj_id} is not on the table and thus cannot be picked.")
             return False 
 
-    def release_object(self, location):
+    def place_object_policy(self, location):
             """Place currently grasped object at location"""
             if self.grasped_object:
                 self.objects[self.grasped_object]['location'] = location
                 
                 self.grasped_object = None
-                self.grasped_part = None
                 self.perceptions["grasped_object"].data = "None"
     
                 self.publish_perceptions()
@@ -252,29 +247,29 @@ class PickAndPlaceSim(Node):
     
             return False
 
-    def grasp_mug_body_policy(self):
-        return self.grasp_object('mug', 'body')
+    # def grasp_mug_body_policy(self):
+    #     return self.grasp_object('mug', 'body')
 
-    def grasp_screwdriver_handle_policy(self):
-        return self.grasp_object('screwdriver', 'handle')
+    # def grasp_screwdriver_handle_policy(self):
+    #     return self.grasp_object('screwdriver', 'handle')
 
-    def grasp_banana_body_policy(self):
-        return self.grasp_object('banana', 'body')
+    # def grasp_banana_body_policy(self):
+    #     return self.grasp_object('banana', 'body')
     
-    def grasp_scissors_handle_policy(self):
-        return self.grasp_object('scissors', 'handle')
+    # def grasp_scissors_handle_policy(self):
+    #     return self.grasp_object('scissors', 'handle')
 
-    def release_at_table_policy(self):
-        return self.release_object('table')
+    # def release_at_table_policy(self):
+    #     return self.release_object('table')
     
-    def release_at_trash_policy(self):
-        return self.release_object('trash')
+    # def release_at_trash_policy(self):
+    #     return self.release_object('trash')
 
-    def release_at_shelf_policy(self):
-        return self.release_object('shelf')
+    # def release_at_shelf_policy(self):
+    #     return self.release_object('shelf')
 
-    def release_at_toolbox_policy(self):
-        return self.release_object('toolbox')
+    # def release_at_toolbox_policy(self):
+    #     return self.release_object('toolbox')
     
     def update_visible_objects(self):
         """Update which objects are visible at current location"""
@@ -310,7 +305,6 @@ class PickAndPlaceSim(Node):
         self.get_logger().debug(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
         # Reset robot to inital state
         self.grasped_object = None
-        self.grasped_part = None
 
         # Reinitialize objects
         self.reset_perceptions()
@@ -354,18 +348,30 @@ class PickAndPlaceSim(Node):
 
         self.get_logger().info(f"OBJECTS BEFORE POLICY: {self.perceptions['objects']}")
         self.get_logger().info(f"GRASPED OBJECT BEFORE: {self.perceptions['grasped_object']}")
-        self.get_logger().info(f"POLICY TO EXECUTE: {request.policy}")
 
-        success = getattr(self, request.policy + "_policy")()
+        request_policy_split = request.policy.split("__")
+        self.get_logger().info(f"POLICY TO EXECUTE: {request_policy_split}")
+
+        policy_name = request_policy_split.pop(0)
+        params = request_policy_split
+        success = getattr(self, policy_name + "_policy")(*params)
 
         self.get_logger().info(f"OBJECTS AFTER POLICY: {self.perceptions['objects']}")
         self.get_logger().info(f"GRASPED OBJECT AFTER: {self.perceptions['grasped_object']}")
+        self.publish_perceptions()
 
-        if not success :
-            self.get_logger().error("Policy execution unsuccessful! Shutting dowm simulator...")
+        if not success :        
+            self.get_logger().error("--- Policy execution unsuccessful! Shutting dowm simulator...")
             rclpy.shutdown()
         response.success = True
         return response
+
+    # def grasp_object_policy(self, target_object, target_location):
+    #     """
+    #     Policy to grasp and release an object at the given location.
+    #     """
+    #     response = self.grasp_request_client.send_request_async(target_objects=target_object, target_location=target_location)
+    #     return response
 
 
 def main(args=None):

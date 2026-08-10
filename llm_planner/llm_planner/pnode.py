@@ -43,7 +43,7 @@ class SemanticPNode(PNode):
         :param perception: all the information about the perception 
         :type perception: dict
         """
-        if activation_list:
+        if activation_list!=None:
             perception = {}
             for sensor in activation_list:
                 activation_list[sensor]["updated"] = False

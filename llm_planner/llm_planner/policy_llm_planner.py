@@ -52,6 +52,9 @@ class DriveLLMPlanner(Drive, LTMSubscription):
 
         self.configure_ltm_subscription(self.LTM_id, self.cbgroup_client)
 
+        self.cnode_dict = {}
+        self.goal_dict = {}
+
     def read_ltm(self, ltm_dump):
         """
         Reads the LTM dump and saves the information on the goals and cnodes.
@@ -71,21 +74,21 @@ class DriveLLMPlanner(Drive, LTMSubscription):
         value = 0.0     # evaluation value for the drive 
         all_neighbors_goal = []
 
-        for cnode in self.cnode_dict:
-            all_neighbors_goal.append(self.get_neighbor_names(cnode['name']))
+        for cnode in self.cnode_dict.keys():
+            all_neighbors_goal.extend(self.get_goal_neighbor_names(cnode))
 
-        goals_diff = set(self.goal_dict) - set(all_neighbors_goal)
+        goals_diff = set(self.goal_dict.keys()) - set(all_neighbors_goal)
         if len(goals_diff) > 0:
-            self.get_logger().info(f"The following Goals need a plan: {goals_diff}")
+            self.get_logger().debug(f"The following Goals need a plan: {goals_diff}")
             value = 0.6
 
         self.evaluation.evaluation = value
         self.evaluation.timestamp = self.get_clock().now().to_msg()
         return self.evaluation
 
-    def get_neighbor_names(self, cnode_name):
+    def get_goal_neighbor_names(self, cnode_name):
         """
-        This method returns the names of the neighbors (Goal type only) of a CNode.
+        This method returns the names of the neighbors, Goal type only, of a CNode.
 
         :param cnode_name: Name of the CNode.
         :type cnode_name: str.
@@ -95,7 +98,7 @@ class DriveLLMPlanner(Drive, LTMSubscription):
         neighbors = self.cnode_dict.get(cnode_name, {}).get("neighbors", [])
         names = []
         for neighbor in neighbors:
-            if neighbor['note_type'] == 'Goal':
+            if neighbor['node_type'] == 'Goal':
                 names.append(neighbor['name'])
         return names
 
@@ -154,7 +157,7 @@ class PolicyLLMPlanner(Policy):
             "perception/grasped_object/value",
             self.perception_callback, 
             1, 
-            callback_group=self.cbgroup_server
+            callback_group=self.cbgroup_client
         )
         data = ""
         updated = False
@@ -184,64 +187,70 @@ class PolicyLLMPlanner(Policy):
         :param response: The response indicating the executed policy.
         :type response: cognitive_node_interfaces.srv.Execute.Response
         """
-        self.get_logger().info(f"== START LLM PLANNER CALLBACK EXECUTE ==")
+        self.get_logger().info(f"== START LLM PLANNER POLICY ==")
 
         perception_dict = perception_msg_to_dict(request.perception)
         self.get_logger().info(f"Received perception: {perception_dict}")
 
-        alignment_cnode = self.get_cnode_name()
-        # cnode_split = cnode.split("__")
-        # target_object = cnode_split[0]
-        # action = cnode_split[1]
-        # goal_name = action + "__goal"
-        # self.get_logger().info(f"Object name: {target_object}, action: {action}")        
-                
         alignment_response = await self.get_alignment_information()
         goal_name = alignment_response.goal_name
         action = re.sub(r"__goal", "", goal_name)
         self.get_logger().info(f"Alignment response {alignment_response}")
 
 
+        # LLM PLAN REQUEST
         plan = self.resquest_llm_plan(goal_name)
+        # plan = "['grasp_mug_body', 'release_at_shelf']"
+        # plan = "['grasp_object__mug__slide']"
         try:
             plan_list = ast.literal_eval(plan)
         except (ValueError, SyntaxError) as e:
             self.get_logger().error(f"Invalid plan returned by LLM: {plan}. Error: {e}")
-        self.get_logger().info(f"LLM generated plan: {plan}")
-    
-        for idx, policy in enumerate(plan_list): 
-            self.get_logger().info(f"Working on plan step {idx+1}: {policy}...")
+        self.get_logger().debug(f"LLM generated plan: {plan}")
 
-            # if policy not in self.policies:
-            #     self.get_logger().error("LLM DID NOT RETURN A VALID POLICY. CHOOSING RANDOMLY...")
-            #     return
+        # EXECUTING THE PLAN
+        for idx, policy in enumerate(plan_list): 
+            self.get_logger().info(f"--- Working on plan step {idx+1}: {policy}...")
             
+            # PNODE CREATION
             target_object = alignment_response.target_object
-            if idx == 0:
+            if self.perception_sub['grasped_object']['updated'] and idx == 0:
+                self.perception_sub['grasped_object']['updated'] = False
                 # in this case the pnode already created by user alignment is used
                 pnode_name = target_object + "__object_pnode"
-            elif self.perception_sub['grasped_object']['updated']:
+            if self.perception_sub['grasped_object']['updated']:
                 self.get_logger().info("Creating PNode...")
                 self.perception_sub['grasped_object']['updated'] = False
                 
                 pnode_params = {}
+                self.get_logger().debug(f"Perception grasped_object before PNode creation: {self.perception_sub['grasped_object']['data']}")
                 if (self.perception_sub["grasped_object"]["data"]=="None" or self.perception_sub["grasped_object"]["data"]==""):
                     is_grasped = False
                     pnode_name = f"{target_object}__object_pnode"
                 else :
                     is_grasped = True
-                    pnode_name = f"grasped__{target_object}__object_pnode"
+                    pnode_name = f"{target_object}__grasped_object_pnode"
                 pnode_params = {"target_object": target_object, "is_grasped": is_grasped}
-                await self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPnode", pnode_params)
+                await self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPNode", pnode_params)
             else :
                 self.get_logger().warning("LLMPlanner - perception was not updated, so PNode was not created!")
 
-            
+
+            # POLICY EXECUTION
+            policy_name = policy['name']
+            for param in policy['params'].values():
+                policy_name += "__" + param
+            # creating the policy node to save on the LTM
+            policy_params = { 'service_msg': 'cognitive_node_interfaces.srv.Policy', 'service_name': '/simulator/executed_policy' }
+            await self.create_node_client(policy_name, "cognitive_nodes.policy.PolicyBlocking", policy_params)
+
             self.get_logger().info(f"Executing plan step {idx+1}: {policy}...")
             if self.executed_primitive_service not in self.node_clients:
                 self.node_clients[self.executed_primitive_service] = ServiceClientAsync(self, self.executed_primitive_type, self.executed_primitive_service, self.cbgroup_client)
-            await self.node_clients[self.executed_primitive_service].send_request_async(policy=policy)
-            
+            await self.node_clients[self.executed_primitive_service].send_request_async(policy=policy_name)
+
+
+            # CNODE CREATION
             cnode_name = f"{action}__step_{idx+1}_cnode"
             neighbors = [
                 {"name": "PICK_AND_PLACE", "node_type": "WorldModel"},
@@ -251,17 +260,17 @@ class PolicyLLMPlanner(Policy):
             cnode_params = {"neighbors": neighbors}
             await self.create_node_client(cnode_name, "cognitive_nodes.cnode.CNode", cnode_params)
 
-            sucess = await self.add_neighbor_client(policy, cnode_name)
+            sucess = await self.add_neighbor_client(policy_name, cnode_name)
             if sucess.success:
-                self.get_logger().info(f"Successfully added the Cnode {cnode_name} as neighbor to policy {policy}")
+                self.get_logger().info(f"Successfully added the Cnode {cnode_name} as neighbor to policy {policy_name}")
             else :
-                self.get_logger().error(f"ERROR Failed to link policy {policy} to CNode {cnode_name}")
+                self.get_logger().error(f"ERROR Failed to link policy {policy_name} to CNode {cnode_name}")
+
+            # await self.delete_neighbor_client(self.name, self.get_cnode_name())
+            # await self.my_delete_node(alignment_cnode)
             
 
         response.policy = self.name 
-
-        await self.my_delete_node(alignment_cnode)
-        await self.delete_neighbor_client(self.name, self.get_cnode_name())
 
         self.get_logger().info(f"Policy {self.name} executed successfully.")
 
