@@ -1,37 +1,56 @@
 high_level_prompt: |
-    You are in charge of a fixed robotic arm ending in a gripper. Your task is the following: {task}
-    Please output a plan, composed of a grasp action and a place action, to carry out this task. You can assume that simple actions (such as grasping or handing objects) automatically move the arm to the correct position, so you should avoid actions such as 'move to...'.
+	You are in charge of a fixed robotic arm ending in a gripper. Your task is the following: {task}
+	Please output a plan, composed of a grasp action and a place action, to carry out this task. You can assume that simple actions (such as grasping or handing objects) automatically move the arm to the correct position, so avoid actions such as 'move to...'.
 
-    Please only output the plan as a tuple of strings, where each step is a string. And output no other text.
-
-low_level_prompt: |
-    Context:
-    You are now in charge of a mobile robot equipped with one arm with a parallel gripper. You will be given a high-level task that you will need to fullfill using this robot, and the corresponding plan, which is a series of simpler steps. You will need to carry out the task step by step by interacting with the system using some code primitives. At each step the plan will be updated and you will receive feedback.
-    The skills are python functions, which allow you to perceive and act on your environment.
- 
-    Skills:
-    Here are the functions and skills, with examples of the syntax:
- 
-    grasp_object(target_object, location)
-        """Grasp the given target object and then releases it to the given location. The possible options for the parameters are:
-		- target_object: 'mug', 'scissors', 'screwdriver', 'earmuffs'
-		- location: 'slide', 'tray' """
- 
-    Examples of syntax: 
-        - grasp_object("earmuffs", "slide")
- 
- 
-    The task and the plan:
-    You are in charge of executing the following task: {task}. The plan is: {plan}.
-    Here are the expected outcomes of each step in the plan, which you can use as a guide:
-    {EO}
- 
-    What I need you to do:
-    Please output a python-style list, which will contain the necessary associated skill for each step of the plan. Each item of the list will be a python-style dictionary, where the keys will be "name" (name of the skill used), "params" (parameters needed for the skill). For example, the skill grasp_object("earmuffs", "slide") will be in the following form {name: "grasp_object", params: {target_object: "earmuffs", location: "slide"}}. Return only the list and output no other text.
-
+	Please only output the plan as a tuple of strings, where each step is a string. And output no other text.
+	
 outcome_prompt: |
-    You are in charge of executing the following task: {task}. The plan consists of the following steps: {plan}. Each of the steps of the plan will be executed with a mobile robot equipped with an arm ending in a gripper. For each step of the plan, I need you to give the expected outcome of the actions involved in the step, in physical and visual terms.
-    This should consist of one or two short, simple sentences that are a more complete and detailed description of the step's outcome. The sentences should describe the final state of the robot, for example if it should be at a location, have grasped an object (and what part of the object, if relevant for the task), or where an object should be put down. You can add some information if the plan is too concise. Here are some examples, with the plan step first and the expected outcome after:
-    - Put bottle on shelf: The bottle should be on the shelf.
-    - Grasp the mug: The mug should be in the robot's gripper.
-    For each step of the plan, please briefly describe the expected outcome as shown above. Return the expected outcomes as a python-style dictionary and output no other text.
+	You are in charge of executing the following task: {task}. The plan consists of the following steps: {plan}. Each of the steps of the plan will be executed with a mobile robot equipped with an arm ending in a gripper. For each step of the plan, I need you to give the expected outcome of the actions involved in the step, in physical and visual terms.
+	This should consist of one or two short, simple sentences that are a more complete and detailed description of the step's outcome. The sentences should describe the final state of the robot, for example if it should be at a location, have grasped an object (and what part of the object, if relevant for the task), or where an object should be put down. You can add some information if the plan is too concise. Here are some examples, with the plan step first and the expected outcome after:
+	- Put bottle on shelf: The bottle should be on the shelf.
+	- Grasp the mug: The mug should be in the robot's gripper.
+	For each step of the plan, please briefly describe the expected outcome as shown above. Return the expected outcomes as a python-style dictionary and output no other text.
+	
+low_level_prompt: |
+	Context:
+	You are now in charge of a mobile robot equipped with one arm with a parallel gripper. You will be given a high-level task that you will need to fullfill using this robot, and the corresponding plan, which is a series of simpler steps. You will need to carry out the task step by step by interacting with the system using some code primitives. At each step the plan will be updated and you will receive feedback.
+	The skills are python functions, which allow you to perceive and act on your environment.
+
+	Skills:
+	Here are the functions and skills, with examples of the syntax:
+
+	grasp_object(target_object)
+	"""Grasp the given target object and then releases it to the given location. The possible options are:
+	    - mug 
+	    - screwdriver
+	    - c-clamp
+	    - earmuffs
+	    - circuit board
+	    - spring_clamp
+	    - cooling_fan
+	    - industrial_gloves
+	    - microship
+	    - tape
+	    - timing_belt
+	    - charger
+	"""
+	Example: grasp_object("earmuffs")
+
+	place_object(location)
+	"""Release and place the grasped object at the given lovation. The possible options are:
+	    - slide
+	    - tray 
+	    - bin 
+	"""
+	Example: place_object("slide")
+
+	The task and the plan:
+	You are in charge of executing the following task: {task}. The plan is: {plan}.
+	Here are the expected outcomes of each step in the plan, which you can use as a guide:
+	{EO}
+
+	What I need you to do:
+	Please output a python-style list, which will contain the necessary associated skill for each step of the plan. Each item of the list will be a python-style dictionary, where the keys will be "name" (name of the skill used chosen from the options given above), "params" (parameters needed for the skill).
+	For example, the skill grasp_object("earmuffs") will be in the following form {name: "grasp_object", params: {target_object: "earmuffs"}}. 
+	Return only the list and output no other text.
+
