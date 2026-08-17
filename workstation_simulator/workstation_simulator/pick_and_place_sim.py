@@ -42,6 +42,7 @@ class PickAndPlaceSim(Node):
         self.perceptions = {}           # dict {sensor1: {attr1: ..., attr2: ...}, sensor2: ...}
         self.base_messages = {}
         self.sim_publishers = {}        # dict {sensor: publisher}
+        self.robot_vision_sub = {}
 
         self.random_seed = self.declare_parameter('random_seed', value = 0).get_parameter_value().integer_value
         self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
@@ -232,8 +233,8 @@ class PickAndPlaceSim(Node):
                 self.get_logger().error(f"Object {obj_id} is not on the table and thus cannot be picked.")
             return False 
 
-    def place_object_policy(self, location):
-            """Place currently grasped object at location"""
+    def release_object_policy(self, location):
+            """Release currently grasped object at location"""
             if self.grasped_object:
                 self.objects[self.grasped_object]['location'] = location
                 
@@ -247,30 +248,6 @@ class PickAndPlaceSim(Node):
     
             return False
 
-    # def grasp_mug_body_policy(self):
-    #     return self.grasp_object('mug', 'body')
-
-    # def grasp_screwdriver_handle_policy(self):
-    #     return self.grasp_object('screwdriver', 'handle')
-
-    # def grasp_banana_body_policy(self):
-    #     return self.grasp_object('banana', 'body')
-    
-    # def grasp_scissors_handle_policy(self):
-    #     return self.grasp_object('scissors', 'handle')
-
-    # def release_at_table_policy(self):
-    #     return self.release_object('table')
-    
-    # def release_at_trash_policy(self):
-    #     return self.release_object('trash')
-
-    # def release_at_shelf_policy(self):
-    #     return self.release_object('shelf')
-
-    # def release_at_toolbox_policy(self):
-    #     return self.release_object('toolbox')
-    
     def update_visible_objects(self):
         """Update which objects are visible at current location"""
         self.visible_objects = {}

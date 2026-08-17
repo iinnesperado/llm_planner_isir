@@ -1,0 +1,8 @@
+torch
+torchvision
+opencv-python
+ultralytics
+open_clip_torch
+numpy<2.0
+Pillow
+tqdm

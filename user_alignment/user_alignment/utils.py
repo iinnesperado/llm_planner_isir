@@ -66,6 +66,7 @@ prompt_template = """#CONTEXT
 You are a fixed robotic arm equipped with a gripper. 
 You can place objects into three distinct boxes:
 
+- toolbox: for tools
 - tray: for personal objects 
 - bin: for trash
 
