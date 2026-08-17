@@ -27,7 +27,7 @@ class UserAlignmentGUI:
         self.root.geometry("500x400")
 
         # Display area for VLM responses
-        tk.Label(self.root, text="Logs:", font=("Arial", 11, "bold")).pack(pady=(10,0))
+        tk.Label(self.root, text="Logs", font=("Arial", 11, "bold")).pack(pady=(10,0))
         self.display = scrolledtext.ScrolledText(self.root, height=10, state='disabled', wrap=tk.WORD)
         self.display.pack(fill=tk.X, padx=10, pady=5)
 
@@ -72,7 +72,7 @@ class UserAlignmentGUI:
 
     def on_ok(self):
         self.response_queue.put("ok")
-        self.display_message("--User clicked 'ok'.")
+        self.display_message("# User clicked 'ok'.")
         self.entry.delete(0, tk.END)
 
     def on_send(self):

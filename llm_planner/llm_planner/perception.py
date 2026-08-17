@@ -13,8 +13,6 @@ class SemanticPerception(Perception):
     """
     Transforms physical perception into semantic perception.
     Can be the class reponsible of the redescription of the physical information.
-
-    NOTE redescripteur utilise un array numpy de l'image
     """
 
     def __init__(self,  name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
@@ -48,6 +46,8 @@ class SemanticPerception(Perception):
                         location=perception.location
                     )
                 )
+            if len(value)==0:
+                value.append(dict())
         elif isinstance(self.reading, Image):
             # img_str = ros_img_to_base64(self.reading)
             # value.append(dict(data=img_str))

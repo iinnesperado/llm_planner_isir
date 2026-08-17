@@ -100,7 +100,7 @@ class VLMRAG():
             id_coll = 0
             # info = input("Add an information for the model to correct the plan (if the proposition is good type 'ok'): ") #Accept user feedback
             if display_fn:
-                display_fn("--Waiting an information for the model to correct the plan...")
+                display_fn("# Waiting an information for the model to correct the plan...")
             if feedback_fn:
                 info = feedback_fn()
           

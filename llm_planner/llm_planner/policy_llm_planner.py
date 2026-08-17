@@ -123,8 +123,8 @@ class PolicyLLMPlanner(Policy):
         self.low_level_prompt = prompts["low_level_prompt"]
         self.outcome_prompt = prompts["outcome_prompt"]
 
-        self.perception_sub = {}
-        self.cofigure_perception()
+        self.grasped_object_sub = {}
+        self.cofigure_grasped_object_sub()
         
     def request_ltm(self):
         """
@@ -147,7 +147,7 @@ class PolicyLLMPlanner(Policy):
         self.get_logger().info(f"Configuring Policies: {policies}") #TODO: Possibility of using new policies added in LTM
         return policies
     
-    def cofigure_perception(self):
+    def cofigure_grasped_object_sub(self):
         """
         Subscription to perception topic 'grasped_object'.
         Information used when creating the Pnodes.
@@ -155,27 +155,26 @@ class PolicyLLMPlanner(Policy):
         subscriber = self.create_subscription(
             PerceptionStamped, 
             "perception/grasped_object/value",
-            self.perception_callback, 
+            self.grasped_object_callback, 
             1, 
             callback_group=self.cbgroup_client
         )
         data = ""
         updated = False
-        new_input = dict(subscriber=subscriber, data=data, updated=updated)
-        self.perception_sub["grasped_object"] = new_input
+        self.grasped_object_sub = dict(subscriber=subscriber, data=data, updated=updated)
         self.get_logger().info(f"{self.name} -- Subscribed to 'grasped_object' perception topic")
     
-    def perception_callback(self, msg: PerceptionStamped):
+    def grasped_object_callback(self, msg: PerceptionStamped):
         """
-        Callback method that reads a perception and stores it in perception_sub list. 
+        Callback method that reads a perception and stores it in grasped_object_sub list. 
         This function should be called everytime the perception topic for 'grasped_object' publishes information. 
         """
         perception_dict = perception_msg_to_dict(msg.perception)
         if len(perception_dict)>1:
             self.get_logger().error(f"{self.name} -- Received perception with multiple sensors: {perception_dict.keys()}. Perception nodes should (currently) include only one sensor!")
         if len(perception_dict)==1:
-            self.perception_sub['grasped_object']['data'] = perception_dict['grasped_object'][0]['data']
-            self.perception_sub['grasped_object']['updated'] = True
+            self.grasped_object_sub['data'] = perception_dict['grasped_object'][0]['data']
+            self.grasped_object_sub['updated'] = True
         else :
             self.get_logger().warning(f"Empty perception received in Policy LLM Planner. No update in the perceptions.")
     
@@ -200,38 +199,38 @@ class PolicyLLMPlanner(Policy):
 
         # LLM PLAN REQUEST
         plan = self.resquest_llm_plan(goal_name)
-        # plan = "['grasp_mug_body', 'release_at_shelf']"
-        # plan = "['grasp_object__mug__slide']"
         try:
             plan_list = ast.literal_eval(plan)
         except (ValueError, SyntaxError) as e:
             self.get_logger().error(f"Invalid plan returned by LLM: {plan}. Error: {e}")
         self.get_logger().debug(f"LLM generated plan: {plan}")
+        # quick testing
+        # plan_list = [{"name": "grasp_object", "params": {"target_object": "mug"}}, 
+        #              {"name": "release_object", "params": {"target_location": "slide"}}]
+
 
         # EXECUTING THE PLAN
         for idx, policy in enumerate(plan_list): 
-            self.get_logger().info(f"--- Working on plan step {idx+1}: {policy}...")
+            self.get_logger().info(f"--- Working on plan step {idx+1}: {policy}")
             
             # PNODE CREATION
             target_object = alignment_response.target_object
-            if self.perception_sub['grasped_object']['updated'] and idx == 0:
-                self.perception_sub['grasped_object']['updated'] = False
-                # in this case the pnode already created by user alignment is used
-                pnode_name = target_object + "__object_pnode"
-            if self.perception_sub['grasped_object']['updated']:
-                self.get_logger().info("Creating PNode...")
-                self.perception_sub['grasped_object']['updated'] = False
+            if self.grasped_object_sub['updated']:
+                self.grasped_object_sub['updated'] = False
                 
                 pnode_params = {}
-                self.get_logger().debug(f"Perception grasped_object before PNode creation: {self.perception_sub['grasped_object']['data']}")
-                if (self.perception_sub["grasped_object"]["data"]=="None" or self.perception_sub["grasped_object"]["data"]==""):
+                self.get_logger().debug(f"Perception grasped_object before PNode creation: {self.grasped_object_sub['data']}")
+                if (self.grasped_object_sub["data"]=="None" or self.grasped_object_sub["data"]==""):
                     is_grasped = False
                     pnode_name = f"{target_object}__object_pnode"
                 else :
                     is_grasped = True
                     pnode_name = f"{target_object}__grasped_object_pnode"
                 pnode_params = {"target_object": target_object, "is_grasped": is_grasped}
-                await self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPNode", pnode_params)
+                if idx != 0:
+                    # for idx == 0 the PNode was created in user alignment policy
+                    self.get_logger().info("Creating PNode...")
+                    await self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPNode", pnode_params)
             else :
                 self.get_logger().warning("LLMPlanner - perception was not updated, so PNode was not created!")
 
@@ -270,29 +269,6 @@ class PolicyLLMPlanner(Policy):
         self.get_logger().info(f"Policy {self.name} executed successfully.")
 
         return response
-    
-    def my_delete_node(self, name):
-        self.get_logged().info("Requesting node deletion")
-        service_name = "commander/delete"
-        if service_name not in self.node_clients:
-            self.node_clients[service_name] = ServiceClientAsync(self, DeleteNode, service_name, self.cbgroup_client)
-        response=self.node_clients[service_name].send_request_async(name=name)
-        return response
-
-    def get_cnode_name(self):
-        """
-        Retrives the name of the Cnode calling the policy LLM Planner.
-        We suppose that the policy LLM Planner has the cnode that calls for him as a neighbor.
-        """
-
-        neighbors_name = [node['name'] for node in self.neighbors]
-        neighbors_type = [node['node_type'] for node in self.neighbors]
-
-        for i, node_type in enumerate(neighbors_type):
-            if node_type == "CNode":
-                return neighbors_name[i]
-        
-        return None
 
     def get_alignment_information(self):
         """
@@ -335,11 +311,7 @@ class PolicyLLMPlanner(Policy):
     def high_level_plan(self, task):
         """
         Generate a high-level plan of the given task.
-        """
-        # file_path = os.path.join(self.prompt_dir, "high_level_prompt.txt")
-        # with open(file_path) as f :
-        #     prompt = f.read()
-        
+        """        
         prompt = re.sub(r"{task}", task, self.high_level_prompt)
 
         response = self.llm_client.generate(prompt)
@@ -350,10 +322,6 @@ class PolicyLLMPlanner(Policy):
         """
         Generates the expected outcomes of the high level plan of the given task.
         """
-        # file_path = os.path.join(self.prompt_dir, "outcome_prompt.txt")
-        # with open(file_path) as f :
-        #     prompt = f.read()
-
         prompt = re.sub(r"{task}", task, self.outcome_prompt)
         prompt = re.sub(r"{plan}", high_level_plan, prompt)
 
@@ -365,10 +333,6 @@ class PolicyLLMPlanner(Policy):
         """
         Generates the low level plan for the robot of a high level plan, its expected outcomes of the given task.
         """
-        # file_path = os.path.join(self.prompt_dir, "low_level_prompt.txt")
-        # with open(file_path) as f :
-        #     prompt = f.read()
-
         prompt = re.sub(r"{task}", task, self.low_level_prompt)
         prompt = re.sub(r"{plan}", high_level_plan, prompt)
         prompt = re.sub(r"{EO}", expected_outcomes, prompt)

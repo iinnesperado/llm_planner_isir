@@ -58,8 +58,8 @@ class PolicyUserAlignment(Policy):
         self.gui = UserAlignmentGUI()
         self.vlm_client = VLMRAG()
 
-        self.robot_vision_sub = {}
-        self.configure_robot_vision_sub()
+        self.camera_sub = {}
+        self.configure_camera_sub()
 
         self.goals_to_plan = []     # list of tuple (goal_name, target_object) that need planning
 
@@ -70,9 +70,9 @@ class PolicyUserAlignment(Policy):
             callback_group=self.cbgroup_server
         )
 
-    def configure_robot_vision_sub(self, robot_deployment=False):
+    def configure_camera_sub(self, robot_deployment=False):
         """
-        Subscription to the perception topic 'robot_vision'.
+        Subscription to the perception topic 'simulator/sensor/camera'.
         Information used for the VLM queries.
 
         For robot testing we subscribe to topic 'camera/rgb'.
@@ -87,36 +87,36 @@ class PolicyUserAlignment(Policy):
             subscriber = self.create_subscription(
                 Image,
                 "/camera/rgb",
-                self.robot_vision_callback,
+                self.camera_sub_callback,
                 qos_profile,
                 callback_group=self.cbgroup_client
             )
         else :
             subscriber = self.create_subscription(
                 Image,
-                "/simulator/sensor/robot_vision",
-                self.robot_vision_callback,
+                "/simulator/sensor/camera",
+                self.camera_sub_callback,
                 1,
                 callback_group=self.cbgroup_client
             )
             
         data = Image()
         updated = False
-        self.robot_vision_sub = dict(subscriber=subscriber, data=data, updated=updated)
-        self.get_logger().info(f"{self.name} -- Subscribed to 'robot_vision' perception topic")
+        self.camera_sub = dict(subscriber=subscriber, data=data, updated=updated)
+        self.get_logger().info(f"{self.name} -- Subscribed to 'camera' perception topic")
 
-    def robot_vision_callback(self, msg: Image):
+    def camera_sub_callback(self, msg: Image):
         """
-        Callback method that reads perception topic 'robot_vision' and stores it in robot_vision_sub.
+        Callback method that reads perception topic 'camera' and stores it in camera_sub.
         
         :param msg: Image coming from the camera of the robot
         :type msg: sensor_msgs.msg.Image
         """
         if len(msg.data)!=0:
-            self.robot_vision_sub['data'] = msg
-            self.robot_vision_sub['updated'] = True
+            self.camera_sub['data'] = msg
+            self.camera_sub['updated'] = True
         else :
-            self.get_logger().warning("Empty 'robot_vision' perception received in Policy User Alignment. No update in the perceptions.")
+            self.get_logger().warning("Empty 'camera' perception received in Policy User Alignment. No update in the perceptions.")
 
     async def execute_callback(self, request, response):
         """
@@ -127,13 +127,12 @@ class PolicyUserAlignment(Policy):
 
         perception_dict = perception_msg_to_dict(request.perception)
 
-        if self.robot_vision_sub['updated']:
-            self.robot_vision_sub['updated'] = False
+        if self.camera_sub['updated']:
+            self.camera_sub['updated'] = False
 
             self.get_logger().info("Querying Ollama vision ...")
-            raw_vision = self.robot_vision_sub['data']
+            raw_vision = self.camera_sub['data']
             encoded_vision = ros_img_to_base64(raw_vision)
-            # vlm_inference = self.vlm_client.infer(encoded_vision)
             vlm_inference = self.vlm_client.infer(
                 encoded_vision, 
                 feedback_fn=self.gui.get_user_input, 
