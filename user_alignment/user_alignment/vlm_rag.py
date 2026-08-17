@@ -29,7 +29,7 @@ class VLMRAG():
         Return only the list and ouput no other text.
         """
 
-    def infer(self, image_path, quick_test=True):
+    def infer(self, image_path, feedback_fn=None, display_fn=None, quick_test=False):
         """
         Generate a vision response for the image.
         """
@@ -89,36 +89,45 @@ class VLMRAG():
             
             response = re.sub(r'<think>.*?</think>\s*', '', response.get('response', ''), flags=re.DOTALL)
             print(f"Response from the model: {response}") #Display initial object suggection
+            if display_fn:
+                display_fn(f"VLM: {response}")
+                
 
-            # context.append({'role':'assistant','content':response})
+            context.append({'role':'assistant','content':response})
 
-            # corrections = []
+            corrections = []
 
-            # id_coll = 0
+            id_coll = 0
             # info = input("Add an information for the model to correct the plan (if the proposition is good type 'ok'): ") #Accept user feedback
-            
+            if display_fn:
+                display_fn("# Waiting an information for the model to correct the plan...")
+            if feedback_fn:
+                info = feedback_fn()
           
-            # if info != 'ok': #If the info is a correction, add it to the database #TODO: embed object id instead to robustify comparison?
-            #     corrections.append(info)
-            #     context.append({'role':'user','content':info})
+            if info != 'ok': #If the info is a correction, add it to the database #TODO: embed object id instead to robustify comparison?
+                corrections.append(info)
+                context.append({'role':'user','content':info})
 
-            #     emb = ollama.embed(model="mxbai-embed-large", input=info)
-            #     embeddings = emb["embeddings"]
-            #     self.collection.add(
-            #         ids=[str(id_coll)],
-            #         embeddings=embeddings,
-            #         documents=[info]
-            #     )
-            #     id_coll += 1
+                emb = ollama.embed(model="mxbai-embed-large", input=info)
+                embeddings = emb["embeddings"]
+                self.collection.add(
+                    ids=[str(id_coll)],
+                    embeddings=embeddings,
+                    documents=[info]
+                )
+                id_coll += 1
 
-            #     docs = get_useful_doc(self.collection, obj, 0.5)
-            #     print(f"Useful documents for the task: {docs}")
-            #     prompt = f"User feedback: {info}. Please update the proposed action."#get_draft(docs, obj)
+                docs = get_useful_doc(self.collection, obj, 0.5)
+                print(f"Useful documents for the task: {docs}")
+                prompt = f"User feedback: {info}. Please update the proposed action."#get_draft(docs, obj)
 
-            #     response = ollama.chat('qwen3:4b',context) #TODO: check this, verify context building, add data saving (ideally with tool)
+                response = ollama.chat('qwen3:4b',context) #TODO: check this, verify context building, add data saving (ideally with tool)
 
-            #     response = re.sub(r'<think>.*?</think>\s*', '', response.message.content, flags=re.DOTALL)
-            #     print(f"Response from the model after adding: {response}")
+                response = re.sub(r'<think>.*?</think>\s*', '', response.message.content, flags=re.DOTALL)
+                print(f"Response from the model after adding: {response}")
+                if display_fn:
+                    display_fn(f"VLM: {response}")
+
             
             return(self.obj, response) #Return object and action
 

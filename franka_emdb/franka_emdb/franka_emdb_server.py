@@ -45,7 +45,7 @@ class FrankaMDB(Node):
         self.cbgroup_client=MutuallyExclusiveCallbackGroup()
 
         # Franka primitives services
-        self.grasp_request_client = ServiceClientAsync(self, GraspRequest, "app/grasp/spin", self.cbgroup_client)
+        self.grasp_release_request_client = ServiceClientAsync(self, GraspRequest, "app/grasp/spin", self.cbgroup_client)
         
         self.load_client=ServiceClient(LoadConfig, 'commander/load_experiment')
     
@@ -94,8 +94,8 @@ class FrankaMDB(Node):
                 self.perceptions[sid].data = 0.0
             elif "String" in classname:
                 self.perceptions[sid].data = ""
-            elif "Image" in classname:
-                self.perceptions[sid] = self.setup_camera_img
+            # elif "Image" in classname:
+            #     self.perceptions[sid] = self.setup_camera_img
                 
             self.get_logger().info("I will publish " + str(sid) + " to... " + str(topic))
             self.sim_publishers[sid] = self.create_publisher(message, topic, 0)
@@ -208,21 +208,28 @@ class FrankaMDB(Node):
         """
         return True
 
-    def grasp_object_policy(self, target_object, target_location):
+    def grasp_object_policy(self, target_object):
         """
         Policy to grasp and release an object at the given location.
+        NOTE Service 'app/grasp/spin' with only target_object does grasp motion.
+
+        :param target_object: object name of the object to grasp
+        :type target_object: str
         """
-        response = self.grasp_request_client.send_request_async(target_objects=target_object, target_location=target_location)
+        response = self.grasp_release_request_client.send_request_async(target_objects=[target_object], target_location="")
         return response
 
-    def place_object_policy(self, location):
+    def release_object_policy(self, target_location):
         """
         Policy to release and place the object in the given location.
-
-        NOTE this might be needed bc of planner issues
+        NOTE Service 'app/grasp/spin' with only target_location does release motion.
+        
+        :param target_location: location name where the object is going to be released.
+        :type target_location: str
         """
-        raise NotImplementedError
-    
+        response = self.grasp_release_request_client.send_request_async(target_objects=[], target_location=target_location)
+        return response
+     
     def update_visible_objects(self):
         """Update which objects are visible at current location"""
         self.visible_objects = {}
@@ -320,13 +327,7 @@ class FrankaMDB(Node):
         self.get_logger().info(f"POLICY TO EXECUTE: {request_policy_split}")
 
         policy_name = request_policy_split.pop(0)
-        if policy_name == 'grasp_object':
-            target_objects = request_policy_split.pop(0)
-            location = request_policy_split.pop(0)
-            # NOTE we can also see if its possible to make it so that it's not a list?
-            params = [[target_objects], location]
-        else :
-            params = request_policy_split
+        params = request_policy_split
         await getattr(self, policy_name + "_policy")(*params)
 
         self.get_logger().info(f"OBJECTS AFTER POLICY: {self.perceptions['objects']}")

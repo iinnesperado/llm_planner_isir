@@ -1,6 +1,8 @@
 import yaml
 import re
 
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
 from sensor_msgs.msg import Image
 from core.service_client import ServiceClient, ServiceClientAsync
 from core_interfaces.srv import CreateNode, UpdateNeighbor
@@ -13,6 +15,7 @@ from llm_planner.utils import perception_msg_to_dict
 from llm_planner_interfaces.srv import GetAlignmentInformation
 
 from user_alignment.vlm_rag import VLMRAG
+from user_alignment.gui import UserAlignmentGUI
 from user_alignment.utils import ros_img_to_base64
 
 class DriveUserAlignment(Drive):
@@ -51,11 +54,12 @@ class PolicyUserAlignment(Policy):
             raise Exception('No LTM input was provided.')
         else:    
             self.LTM_id = ltm_id
-        
+
+        self.gui = UserAlignmentGUI()
         self.vlm_client = VLMRAG()
 
-        self.perception_sub = {}
-        self.configure_perception()
+        self.camera_sub = {}
+        self.configure_camera_sub()
 
         self.goals_to_plan = []     # list of tuple (goal_name, target_object) that need planning
 
@@ -66,6 +70,54 @@ class PolicyUserAlignment(Policy):
             callback_group=self.cbgroup_server
         )
 
+    def configure_camera_sub(self, robot_deployment=False):
+        """
+        Subscription to the perception topic 'simulator/sensor/camera'.
+        Information used for the VLM queries.
+
+        For robot testing we subscribe to topic 'camera/rgb'.
+        """
+        
+        if robot_deployment:
+            qos_profile = QoSProfile(
+                reliability=ReliabilityPolicy.BEST_EFFORT,
+                history=HistoryPolicy.KEEP_LAST, 
+                depth=10
+            )
+            subscriber = self.create_subscription(
+                Image,
+                "/camera/rgb",
+                self.camera_sub_callback,
+                qos_profile,
+                callback_group=self.cbgroup_client
+            )
+        else :
+            subscriber = self.create_subscription(
+                Image,
+                "/simulator/sensor/camera",
+                self.camera_sub_callback,
+                1,
+                callback_group=self.cbgroup_client
+            )
+            
+        data = Image()
+        updated = False
+        self.camera_sub = dict(subscriber=subscriber, data=data, updated=updated)
+        self.get_logger().info(f"{self.name} -- Subscribed to 'camera' perception topic")
+
+    def camera_sub_callback(self, msg: Image):
+        """
+        Callback method that reads perception topic 'camera' and stores it in camera_sub.
+        
+        :param msg: Image coming from the camera of the robot
+        :type msg: sensor_msgs.msg.Image
+        """
+        if len(msg.data)!=0:
+            self.camera_sub['data'] = msg
+            self.camera_sub['updated'] = True
+        else :
+            self.get_logger().warning("Empty 'camera' perception received in Policy User Alignment. No update in the perceptions.")
+
     async def execute_callback(self, request, response):
         """
         Execute the infer() function of VLMRAG I guess.
@@ -75,13 +127,17 @@ class PolicyUserAlignment(Policy):
 
         perception_dict = perception_msg_to_dict(request.perception)
 
-        if self.perception_sub['robot_vision']['updated']:
-            self.perception_sub['robot_vision']['updated'] = False
+        if self.camera_sub['updated']:
+            self.camera_sub['updated'] = False
 
             self.get_logger().info("Querying Ollama vision ...")
-            raw_vision = self.perception_sub['robot_vision']['data']
+            raw_vision = self.camera_sub['data']
             encoded_vision = ros_img_to_base64(raw_vision)
-            vlm_inference = self.vlm_client.infer(encoded_vision)
+            vlm_inference = self.vlm_client.infer(
+                encoded_vision, 
+                feedback_fn=self.gui.get_user_input, 
+                display_fn=self.gui.display_message
+            )
 
             (obj_name, action) = vlm_inference
             obj_name = re.sub(" ", "_", obj_name)
@@ -107,44 +163,6 @@ class PolicyUserAlignment(Policy):
         self.get_logger().info(f"Policy {self.name} executed successfully.")
 
         return response
-
-    def configure_perception(self, robot_deployment=False):
-        """
-        Subscription to the perception topic 'robot_vision'.
-        Information used for the VLM queries.
-
-        For robot testing we subscribe to topic 'camera/rgb'.
-        """
-        if robot_deployment:
-            service_name = "/camera/rgb"
-        else :
-            service_name = "/simulator/sensor/robot_vision"
-
-        subscriber = self.create_subscription(
-            Image,
-            service_name,
-            self.perception_callback,
-            1,
-            callback_group=self.cbgroup_server
-        )
-        data = Image()
-        updated = False
-        new_input = dict(subscriber=subscriber, data=data, updated=updated)
-        self.perception_sub["robot_vision"] = new_input
-        self.get_logger().info(f"{self.name} -- Subscribed to 'robot_vision' perception topic")
-
-    def perception_callback(self, msg: Image):
-        """
-        Callback method that reads perception topic 'robot_vision' and stores it in perception_sub.
-        
-        :param msg: Image coming from the camera of the robot
-        :type msg: sensor_msgs.msg.Image
-        """
-        if len(msg.data)!=0:
-            self.perception_sub['robot_vision']['data'] = msg
-            self.perception_sub['robot_vision']['updated'] = True
-        else :
-            self.get_logger().warning("Empty 'robot_vision' perception received in Policy User Alignment. No update in the perceptions.")
     
     def set_activation(self, node_type, node_name, activation):
         """
