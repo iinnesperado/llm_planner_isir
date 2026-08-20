@@ -75,3 +75,23 @@ class SemanticPNode(PNode):
                 self.activation_inputs[node_name]['timestamp']=Time.from_msg(msg.timestamp)
         else:
             self.get_logger().warn(f"Empty perception recieved in P-Node. No activation calculated")
+
+    def add_point(self, point, confidence):
+        """
+        Add a new point (or anti-point) to the P-Node.
+        For semantic logic, perception does not need to be separated.
+        
+        :param point: The point that is added to the P-Node.
+        :type point: dict
+        :param confidence: Indicates if the perception added is a point or an antipoint.
+        :type confidence: float
+        """
+        self.space = self.spaces[0]
+        if not self.space:
+            self.space = self.spaces[0].__class__()
+            self.spaces.append(self.space)
+        added_point_pos = self.space.add_point(point, confidence)
+        self.added_point = True
+        self.update_history(confidence)
+        self.publish_success_rate()
+        self.get_logger().info(f"P-Node success rate: {self.success_rate}")

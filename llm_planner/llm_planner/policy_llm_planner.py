@@ -64,7 +64,7 @@ class DriveLLMPlanner(Drive, LTMSubscription):
 
     def evaluate(self, perception=None):
         """
-        Evaluation that returns 0.6 when there is a goal that needs to be planned.
+        Evaluation that returns 0.4 when there is a goal that needs to be planned.
 
         :param perception: Unused perception.
         :type perception: dict or Any.
@@ -80,7 +80,7 @@ class DriveLLMPlanner(Drive, LTMSubscription):
         goals_diff = set(self.goal_dict.keys()) - set(all_neighbors_goal)
         if len(goals_diff) > 0:
             self.get_logger().debug(f"The following Goals need a plan: {goals_diff}")
-            value = 0.6
+            value = 0.4
 
         self.evaluation.evaluation = value
         self.evaluation.timestamp = self.get_clock().now().to_msg()
@@ -198,15 +198,15 @@ class PolicyLLMPlanner(Policy):
 
 
         # LLM PLAN REQUEST
-        plan = self.resquest_llm_plan(goal_name)
-        try:
-            plan_list = ast.literal_eval(plan)
-        except (ValueError, SyntaxError) as e:
-            self.get_logger().error(f"Invalid plan returned by LLM: {plan}. Error: {e}")
-        self.get_logger().debug(f"LLM generated plan: {plan}")
+        # plan = self.resquest_llm_plan(goal_name)
+        # try:
+        #     plan_list = ast.literal_eval(plan)
+        # except (ValueError, SyntaxError) as e:
+        #     self.get_logger().error(f"Invalid plan returned by LLM: {plan}. Error: {e}")
+        # self.get_logger().debug(f"LLM generated plan: {plan}")
         # quick testing
-        # plan_list = [{"name": "grasp_object", "params": {"target_object": "mug"}}, 
-        #              {"name": "release_object", "params": {"target_location": "slide"}}]
+        plan_list = [{"name": "grasp_object", "params": {"target_object": "mug"}}, 
+                     {"name": "release_object", "params": {"target_location": "tray"}}]
 
 
         # EXECUTING THE PLAN

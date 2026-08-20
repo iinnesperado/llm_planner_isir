@@ -12,7 +12,7 @@ from user_alignment.utils import get_useful_doc, get_draft
 
 
 class VLMRAG():
-    def __init__(self):
+    def __init__(self, prompt_vlm=None):
 
         # Initialize the ChromaDB client
         self.client = chromadb.Client()
@@ -22,14 +22,17 @@ class VLMRAG():
         self.documents = []
 
         # Generate a vision response for the image
-        self.prompt_vlm = """
-        You are a robot assistant. 
-        Please look at the image and describe in one or two word one object that you see on the table, ignoring the table and any robot arms. 
-        Output the description as a python-like list. The item on the list will be a string corresponding to the description. 
-        Return only the list and ouput no other text.
-        """
+        if prompt_vlm:
+            self.prompt_vlm = prompt_vlm
+        else :
+            self.prompt_vlm = """
+            You are a robot assistant. 
+            Please look at the image and describe in one word one object that you see on the table, ignoring the table and any robot arms. 
+            Output the description as a python-like list. The item on the list will be a string corresponding to the description. 
+            Return only the list and ouput no other text.
+            """
 
-    def infer(self, image_path, feedback_fn=None, display_fn=None, quick_test=False):
+    def infer(self, image_path, feedback_fn=None, display_fn=None, quick_test=True):
         """
         Generate a vision response for the image.
         """
