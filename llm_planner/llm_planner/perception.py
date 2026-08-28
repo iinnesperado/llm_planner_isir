@@ -1,8 +1,11 @@
 import os
 import cv2
+import numpy
 from cv_bridge import CvBridge
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 from sensor_msgs.msg import Image
+from core.utils import class_from_classname
 from cognitive_nodes.perception import Perception
 from llm_planner.utils import perception_dict_to_msg
 
@@ -17,6 +20,22 @@ class SemanticPerception(Perception):
 
     def __init__(self,  name='perception', class_name = 'cognitive_nodes.perception.Perception', default_msg = None, default_topic = None, normalize_data = None, **params):
         super().__init__(name, class_name, default_msg, default_topic, normalize_data, **params)
+
+        # for robot deployment, need to manually setup the qos profile
+        if default_topic == "/camera/rgb":
+            self.destroy_subscription(self.default_suscription)
+
+            qos_profile = QoSProfile(
+                reliability=ReliabilityPolicy.BEST_EFFORT,
+                history=HistoryPolicy.KEEP_LAST, 
+                depth=10
+            )
+            self.default_suscription = self.create_subscription(
+                class_from_classname(default_msg),
+                default_topic,
+                self.read_perception_callback,
+                qos_profile,
+            )
 
         self.bridge = CvBridge()
 
@@ -46,20 +65,24 @@ class SemanticPerception(Perception):
                         location=perception.location
                     )
                 )
-            if len(value)==0:
-                value.append(dict())
+            # if len(value)==0:
+            #     value.append(dict())
         elif isinstance(self.reading, Image):
             # img_str = ros_img_to_base64(self.reading)
             # value.append(dict(data=img_str))
 
             object_predictions = self.get_predictions(self.reading)
-            object_pred = object_predictions[0][0]
-            value.append(
-                dict(
-                    name=object_pred, 
-                    location="table"
+            if len(object_predictions) > 0:
+                best_object = self.get_best_prediction(object_predictions)
+                value.append(
+                    dict(
+                        name=best_object, 
+                        location="table"
+                    )
                 )
-            )
+            # else:
+            #     value.append(dict())
+            
         else :
             value.append(dict(data=self.reading.data))
 
@@ -90,4 +113,17 @@ class SemanticPerception(Perception):
         
         except Exception as e:
             self.get_logger().error(f"Error in object prediction: {e}")
-        
+
+    def get_best_prediction(self, prediction_list):
+        """
+        Get the object prediction with the highest score of confidence.
+
+        :param prediction_list: all the predictions (label, score) by the redescriptor module
+        :type prediction_list: list[tuple]
+        :return: name of the object with the highest confidence
+        :rtype: str
+        """
+        object_name = [label for label,_ in prediction_list]
+        confidence = [score for _, score in prediction_list]
+        max_idx = numpy.argmax(confidence)
+        return object_name[max_idx]

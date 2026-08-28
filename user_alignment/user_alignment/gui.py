@@ -88,7 +88,7 @@ class UserAlignmentGUI:
         """Send a message to be displayed in the GUI (thread-safe)."""
         self.message_queue.put(text)
 
-    def get_user_input(self, timeout=60.0):
+    def get_user_input(self, timeout=90.0):
         """
         Block until the user submits feedback or timeout.
         Returns 'ok' if user clicked OK, or the correction string.
@@ -96,4 +96,5 @@ class UserAlignmentGUI:
         try:
             return self.response_queue.get(timeout=timeout)
         except queue.Empty:
+            self.display_message("# Timeout: defaulting to 'ok'.")
             return "ok"  # default to ok if user doesn't respond

@@ -8,15 +8,18 @@ from llm_planner.utils import perception_msg_to_dict
 from llm_planner_interfaces.srv import GetTargetObject
 
 class SemanticPNode(PNode):
-    def __init__(self, name='pnode', class_name='cognitive_nodes.pnode.PNode', target_object=None, is_grasped=False, **params):
+    def __init__(self, name='pnode', class_name='cognitive_nodes.pnode.PNode', target_object=None, is_grasped=False, space_class=None, **params):
         """
         Surchage of PNode class to be able to add the information of the target_object and other to associated space.
 
         :param target_object: equiv to "target_object is on the table/ my hand"
         :param is_grasped: makes reference if the Pnode is gonna be "table" or "grasper" type, as in it has the object on its hand or not
         """
-        space = SemanticSpace(target_object=target_object, is_grasped=is_grasped, ident=name+ " space")
-        super().__init__(name, class_name, space=space, **params)
+        if target_object is not None and is_grasped is not None:
+            space = SemanticSpace(target_object=target_object, is_grasped=is_grasped, ident=name+ " space")
+            super().__init__(name, class_name, space=space, **params)
+        else:
+            super().__init__(name, class_name, space_class)
 
         self.target_object = target_object
 
@@ -75,3 +78,23 @@ class SemanticPNode(PNode):
                 self.activation_inputs[node_name]['timestamp']=Time.from_msg(msg.timestamp)
         else:
             self.get_logger().warn(f"Empty perception recieved in P-Node. No activation calculated")
+
+    def add_point(self, point, confidence):
+        """
+        Add a new point (or anti-point) to the P-Node.
+        For semantic logic, perception does not need to be separated.
+        
+        :param point: The point that is added to the P-Node.
+        :type point: dict
+        :param confidence: Indicates if the perception added is a point or an antipoint.
+        :type confidence: float
+        """
+        self.space = self.spaces[0]
+        if not self.space:
+            self.space = self.spaces[0].__class__()
+            self.spaces.append(self.space)
+        added_point_pos = self.space.add_point(point, confidence)
+        self.added_point = True
+        self.update_history(confidence)
+        self.publish_success_rate()
+        self.get_logger().info(f"P-Node success rate: {self.success_rate}")

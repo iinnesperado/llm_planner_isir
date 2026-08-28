@@ -5,14 +5,14 @@ import re
 import faster_whisper
 import ast
 import numpy as np
-from user_alignment.utils import get_useful_doc, get_draft
+from user_alignment.utils import get_useful_doc, get_draft, make_object_name_correction
 
 # For testing independently
 # from utils import get_useful_doc, get_draft
 
 
 class VLMRAG():
-    def __init__(self):
+    def __init__(self, prompt_vlm=None):
 
         # Initialize the ChromaDB client
         self.client = chromadb.Client()
@@ -22,14 +22,19 @@ class VLMRAG():
         self.documents = []
 
         # Generate a vision response for the image
-        self.prompt_vlm = """
-        You are a robot assistant. 
-        Please look at the image and describe in one or two word one object that you see on the table, ignoring the table and any robot arms. 
-        Output the description as a python-like list. The item on the list will be a string corresponding to the description. 
-        Return only the list and ouput no other text.
-        """
+        if prompt_vlm:
+            self.prompt_vlm = prompt_vlm
+        else :
+            self.prompt_vlm = """
+            You are a robot assistant.
+            Please look at the image and describe in one word one object that you see on the table, ignoring the table and any robot arms. 
+            Output the description as a python-like list. The item on the list will be a string corresponding to the description. 
+            Return only the list and ouput no other text.
+            """
 
-    def infer(self, image_path, feedback_fn=None, display_fn=None, quick_test=False):
+        self.object_correction_cpt = 0
+
+    def infer(self, image_path, feedback_fn=None, display_fn=None, node=None, quick_test=False):
         """
         Generate a vision response for the image.
         """
@@ -40,6 +45,9 @@ class VLMRAG():
         
         ###
         # Get image description (object list) from the VLM
+        if display_fn:
+            display_fn("# Quering the VLM...")
+        
         response = ollama.generate(
             model='llama3.2-vision',
             prompt=self.prompt_vlm,
@@ -64,7 +72,10 @@ class VLMRAG():
             obj_list_str = match.group(0)
             obj_list = ast.literal_eval(obj_list_str)  #
             print(f"Extracted object list: {obj_list}")
+            node.get_logger().info(f">> Extracted object list from VLM: {obj_list}")
+            obj_list, self.object_correction_cpt = make_object_name_correction(obj_list, self.object_correction_cpt, node)
             self.obj = obj_list[0]
+            # node.get_logger().info(f"{obj_list=}, {self.obj=}, {self.object_correction_cpt=}")
         else:
             print("List not found")
             
@@ -91,7 +102,8 @@ class VLMRAG():
             print(f"Response from the model: {response}") #Display initial object suggection
             if display_fn:
                 display_fn(f"VLM: {response}")
-                
+            node.get_logger().info(">> Finished quering VLM")
+            
 
             context.append({'role':'assistant','content':response})
 
@@ -101,10 +113,15 @@ class VLMRAG():
             # info = input("Add an information for the model to correct the plan (if the proposition is good type 'ok'): ") #Accept user feedback
             if display_fn:
                 display_fn("# Waiting an information for the model to correct the plan...")
+                node.get_logger().info(">> Requesting user feedback")
+
             if feedback_fn:
                 info = feedback_fn()
-          
+            node.get_logger().info(f">> Received user feedback {info=}")
+
             if info != 'ok': #If the info is a correction, add it to the database #TODO: embed object id instead to robustify comparison?
+                node.get_logger().info(f">> Quering VLM with correction...")
+
                 corrections.append(info)
                 context.append({'role':'user','content':info})
 
@@ -126,8 +143,12 @@ class VLMRAG():
                 response = re.sub(r'<think>.*?</think>\s*', '', response.message.content, flags=re.DOTALL)
                 print(f"Response from the model after adding: {response}")
                 if display_fn:
-                    display_fn(f"VLM: {response}")
+                    display_fn(f"VLM correction: {response}")
+                node.get_logger().info(">> Finished quering VLM with correction")
 
+
+            if display_fn:
+                display_fn("\n")
             
             return(self.obj, response) #Return object and action
 

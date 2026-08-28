@@ -3,6 +3,7 @@ import yamlloader
 from copy import copy, deepcopy
 import numpy as np
 import os
+import time
 import rclpy
 from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
@@ -44,19 +45,20 @@ class PickAndPlaceSim(Node):
         self.perceptions = {}           # dict {sensor1: {attr1: ..., attr2: ...}, sensor2: ...}
         self.base_messages = {}
         self.sim_publishers = {}        # dict {sensor: publisher}
-        self.robot_vision_sub = {}
 
         self.random_seed = self.declare_parameter('random_seed', value = 0).get_parameter_value().integer_value
         self.config_file = self.declare_parameter('config_file', descriptor=ParameterDescriptor(dynamic_typing=True)).get_parameter_value().string_value
 
         self.objects = {}               # dict {obj_id: {location: location_id}}
-        # self.visible_objects = {}
-        # self.object_to_pick = None      # string
         self.grasped_object = None      # check if the robot has already an object
+        self.img_idx = 0
         
         # Callback groups for concurrency
         self.cbgroup_server=MutuallyExclusiveCallbackGroup()
         self.cbgroup_client=MutuallyExclusiveCallbackGroup()
+
+        self.robot_vision_sub = {}
+        self.configure_robot_vision_sub()
         
         self.load_client=ServiceClient(LoadConfig, 'commander/load_experiment')
         self.get_logger().info("PickAndPlaceSim initialized")
@@ -84,7 +86,6 @@ class PickAndPlaceSim(Node):
 
                 # self.setup_objects(config["DiscreteEventSimulator"]["Objects"])
         
-        self.configure_robot_vision_sub()
         self.load_experiment_file_in_commander()
 
     def setup_perceptions(self, perceptions):
@@ -103,11 +104,12 @@ class PickAndPlaceSim(Node):
             if "List" in classname:
                 self.perceptions[sid].data = []
                 self.base_messages[sid] = class_from_classname(classname.replace("List", ""))
-            # elif "Float" in classname:
-            #     self.perceptions[sid].data = 0.0
+            elif "Float" in classname:
+                self.perceptions[sid].data = 0.0
             elif "String" in classname:
                 self.perceptions[sid].data = ""
             elif "Image" in classname:
+                self.exp_phase = "training"
                 self.perceptions[sid] = self.setup_camera_img()
                 
             self.get_logger().info("I will publish " + str(sid) + " to... " + str(topic))
@@ -120,7 +122,17 @@ class PickAndPlaceSim(Node):
         Sets up the static image to be published during the simulation.
         Only used for testing wihout a camera in simulator.
         """
-        img_msg = png_to_ros_img("/home/user/ines_ros2_humble/eMDB_ws/build/workstation_simulator/workstation_simulator/config/rgb_001.png")
+        img_max = {"training": 4, "validation": 5}
+        if self.img_idx < img_max[self.exp_phase]:
+            img_msg = png_to_ros_img(f"/home/user/ines_ros2_humble/eMDB_ws/build/workstation_simulator/workstation_simulator/config/rgb_00{self.img_idx}.png")
+        # elif self.img_idx<14 :
+        #     img_msg = png_to_ros_img(f"/home/user/ines_ros2_humble/eMDB_ws/build/workstation_simulator/workstation_simulator/config/rgb_0{self.img_idx}.png")
+        else :
+            self.img_idx = 0
+            self.exp_phase = "validation"
+            img_msg = png_to_ros_img(f"/home/user/ines_ros2_humble/eMDB_ws/build/workstation_simulator/workstation_simulator/config/rgb_00{self.img_idx}.png")
+
+        # img_msg = png_to_ros_img(f"/home/user/ines_ros2_humble/eMDB_ws/build/workstation_simulator/workstation_simulator/config/rgb_001.png")
         img_msg.header.stamp = self.get_clock().now().to_msg()
 
         return img_msg
@@ -149,12 +161,12 @@ class PickAndPlaceSim(Node):
         """
         perception_dict = perception_msg_to_dict(msg.perception)
         if len(perception_dict)>1:
-                    self.get_logger().error(f"Received perception with multiple sensors: {perception_dict.keys()}. Perception nodes should (currently) include only one sensor!")
+            self.get_logger().error(f"Received perception with multiple sensors: {perception_dict.keys()}. Perception nodes should (currently) include only one sensor!")
         if len(perception_dict)==1:
             self.robot_vision_sub['data'] = perception_dict['robot_vision'][0]
             self.robot_vision_sub['updated'] = True
             self.update_objects(self.robot_vision_sub['data'])
-            # self.publish_perceptions()
+            self.publish_perceptions()
         else :
             self.get_logger().warning("Empty 'robot_vision' perception received in Pick and Place Sim. No update in the perceptions.")
 
@@ -214,7 +226,7 @@ class PickAndPlaceSim(Node):
         loaded = self.load_client.send_request(file = self.config_file)
         return loaded
 
-    def reward_progress_object_in_place(self):
+    def reward_progress_clean_workspace(self):
         """
         Gives a larger reward the closer the robot is to the goal of putting the object in its rightful place.
         If the object is placed right, the reward is 1.0.
@@ -227,18 +239,18 @@ class PickAndPlaceSim(Node):
         elif self.check_object_pickable():
             progress = 0.2
         
-        self.perceptions['progress_object_in_place'].data = progress
+        self.perceptions['progress_clean_workspace'].data = progress
         # self.get_logger().info(f"Progress: {progress}, Perception: {self.perceptions}")
 
     def check_object_in_place(self):
         """
-        Checks if the object is its home location.
+        Checks if the object is its target location.
         Returns True if there is reward, False if not.
 
-        Simple logic, the moment one object reaches its home location we get reward.
+        Simple logic, the moment one object reaches its target location we get reward.
         """
         for _, obj_data in self.objects.items():
-            if obj_data['location'] == obj_data['home']:
+            if obj_data['location'] not in ["table", "in_hand"]:
                 return True
         return False
     
@@ -246,27 +258,26 @@ class PickAndPlaceSim(Node):
         """
         Checks if object has been grasped.
         """
-        if self.perceptions['grasped_object'].data=="None":
-            return False
-        elif self.perceptions['grasped_object'].data=="":
-            self.get_logger().warn("Checking perception for 'grasped_object' returns empty !")
-            return False
-        return True
+        return self.grasped_object is not None
     
     def check_object_pickable(self):
         """
-        An object is pickable if it's visible. For the moment that means it is everything.
+        An object is pickable if it's visible.
         """
-        return True
+        if self.robot_vision_sub['updated']:
+            self.robot_vision_sub['updated'] = False
+            return len(self.robot_vision_sub['data'])!=0
+        return False
 
     def new_action_service_callback(self, request, response):
         """Execute the policy and publish perceptions."""
-        self.get_logger().info("Executing policy " + str(request.policy))
+        self.get_logger().info(f">> Start executing policy {request.policy} ...")
         self.get_logger().info(f"ITERATION: {self.iteration}")
 
-        self.get_logger().info(f"OBJECTS BEFORE POLICY: {self.perceptions['objects']}")
-        self.get_logger().info(f"GRASPED OBJECT BEFORE: {self.perceptions['grasped_object']}")
+        self.get_logger().info(f"OBJECTS BEFORE POLICY: {self.objects}")
+        self.get_logger().info(f"GRASPED OBJECT BEFORE: {self.grasped_object}")
 
+        time.sleep(6)
         request_policy_split = request.policy.split("__")
         self.get_logger().info(f"POLICY TO EXECUTE: {request_policy_split}")
 
@@ -274,46 +285,43 @@ class PickAndPlaceSim(Node):
         params = request_policy_split
         success = getattr(self, policy_name + "_policy")(*params)
 
-        self.get_logger().info(f"OBJECTS AFTER POLICY: {self.perceptions['objects']}")
-        self.get_logger().info(f"GRASPED OBJECT AFTER: {self.perceptions['grasped_object']}")
+        self.get_logger().info(f"OBJECTS AFTER POLICY: {self.objects}")
+        self.get_logger().info(f"GRASPED OBJECT AFTER: {self.grasped_object}")
+        self.update_reward_sensor()
         self.publish_perceptions()
 
         if not success :        
-            self.get_logger().error("--- Policy execution unsuccessful! Shutting dowm simulator...")
+            self.get_logger().error(f"ERROR - {request.policy} policy execution unsuccessful! Shutting dowm simulator...")
             rclpy.shutdown()
         response.success = True
+        self.get_logger().info(f">> Success in execution of policy {request.policy}")
         return response
 
     def grasp_object_policy(self, target_object):
-            """Grasp an object if it's visible at current location"""
-            visible_object = self.robot_vision_sub['data']
-            self.robot_vision_sub['updated'] = False
-            if target_object == visible_object['name']:
-                self.grasped_object = target_object             
-                self.objects[target_object]["location"] = "in_hand"
-                # self.visible_objects.pop(target_object)  # Remove from visible
-                self.perceptions["grasped_object"].data = target_object
-    
-                self.publish_perceptions()
-                return True
-            else:
-                self.get_logger().error(f"Object {target_object} is not on the table and thus cannot be picked.")
-            return False 
+        """Grasp an object if it's visible at current location"""
+        visible_object = self.robot_vision_sub['data']
+        self.robot_vision_sub['updated'] = False
+        if target_object == visible_object['name']:
+            self.grasped_object = target_object
+            self.objects[target_object]["location"] = "in_hand"
+            self.publish_perceptions()
+            return True
+        else:
+            self.get_logger().error(f"Object {target_object} is not on the table and thus cannot be picked.")
+        return False 
 
     def release_object_policy(self, target_location):
-            """Release currently grasped object at location"""
-            if self.grasped_object:
-                self.objects[self.grasped_object]['location'] = target_location
-                
-                self.grasped_object = None
-                self.perceptions["grasped_object"].data = "None"
-    
-                self.publish_perceptions()
-                return True
-            else :
-                self.get_logger().warning("WARNING - Robot has no object to release !")
-    
-            return False
+        """Release currently grasped object at location"""
+        if self.grasped_object:
+            self.objects[self.grasped_object]['location'] = target_location
+            self.grasped_object = None
+            self.img_idx += 1
+            self.publish_perceptions()
+            return True
+        else :
+            self.get_logger().warning("WARNING - Robot has no object to release !")
+
+        return False
 
     def update_reward_sensor(self):
         """Update goal sensors' values."""
@@ -326,7 +334,8 @@ class PickAndPlaceSim(Node):
         """
         Publish the current perceptions to the corresponding topics.
         """
-        self.perceptions['grasped_object'].data = self.grasped_object or "None"
+        self.perceptions['camera'] = self.setup_camera_img()
+        self.perceptions['grasped_object'].data = self.grasped_object if self.grasped_object is not None else "None"
         # Updates the location of the objects in corresponding perception data
         for obj in self.perceptions["objects"].data:
             obj.location = self.objects[obj.name]["location"]
@@ -339,10 +348,12 @@ class PickAndPlaceSim(Node):
         self.get_logger().debug(f"DEBUG: WORLD RESET OLD: {self.perceptions}")
         # Reset robot to inital state
         self.grasped_object = None
-        self.objects = {}
+        # self.objects = {}
 
         # Reinitialize objects
         self.reset_perceptions()
+
+        self.update_reward_sensor()
         self.publish_perceptions()
         self.get_logger().debug(f"DEBUG: WORLD RESET NEW: {self.perceptions}")
 
@@ -358,8 +369,9 @@ class PickAndPlaceSim(Node):
         The grasped is None.
         """
         self.perceptions['grasped_object'].data = "None"
-        self.perceptions['objects'].data = []
-
+        # self.perceptions['objects'].data = []
+        self.perceptions['progress_clean_workspace'].data = 0.0
+        
     def new_command_callback(self, data):
         """
         Process a command received

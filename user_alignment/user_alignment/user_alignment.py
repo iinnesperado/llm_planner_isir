@@ -35,20 +35,19 @@ class DriveUserAlignment(Drive):
 
     def evaluate(self, perception=None):
         """
-        Evaluation that always returns 1.0, as the drive is always .
+        Evaluation that always returns 0.2, as the drive is always .
 
         :param perception: Unused perception.
         :type perception: dict or Any.
         :return: Evaluation of the Drive.
         :rtype: cognitive_node_interfaces.msg.Evaluation
         """        
-        # self.evaluation.evaluation = 1.0
-        self.evaluation.evaluation = 0.5
+        self.evaluation.evaluation = 0.2
         self.evaluation.timestamp = self.get_clock().now().to_msg()
         return self.evaluation
 
 class PolicyUserAlignment(Policy):
-    def __init__(self, name="policy", ltm_id=None, **params):
+    def __init__(self, name="policy", ltm_id=None, prompt=None, robot_deployment=False, **params):
         super().__init__(name, **params)
         if ltm_id is None:
             raise Exception('No LTM input was provided.')
@@ -56,10 +55,10 @@ class PolicyUserAlignment(Policy):
             self.LTM_id = ltm_id
 
         self.gui = UserAlignmentGUI()
-        self.vlm_client = VLMRAG()
+        self.vlm_client = VLMRAG(prompt)
 
         self.camera_sub = {}
-        self.configure_camera_sub()
+        self.configure_camera_sub(robot_deployment)
 
         self.goals_to_plan = []     # list of tuple (goal_name, target_object) that need planning
 
@@ -67,7 +66,7 @@ class PolicyUserAlignment(Policy):
             GetAlignmentInformation, 
             "user_alignment/get_alignment_information", 
             self.get_alignment_information_callback, 
-            callback_group=self.cbgroup_server
+            callback_group=self.cbgroup_client
         )
 
     def configure_camera_sub(self, robot_deployment=False):
@@ -123,26 +122,28 @@ class PolicyUserAlignment(Policy):
         Execute the infer() function of VLMRAG I guess.
         And then do all the working around the nodes to have the goal, pnode, cnode and connect to planner policy.
         """
-        self.get_logger().info(f"== START USER ALIGNMENT POLICY ==")
+        self.get_logger().info(f">> Starting execution of policy {self.name}")
 
         perception_dict = perception_msg_to_dict(request.perception)
+        self.get_logger().info(f"Received perception: {perception_dict}")
 
         if self.camera_sub['updated']:
             self.camera_sub['updated'] = False
 
-            self.get_logger().info("Querying Ollama vision ...")
+            self.get_logger().info(">> Querying VLM ...")
             raw_vision = self.camera_sub['data']
             encoded_vision = ros_img_to_base64(raw_vision)
             vlm_inference = self.vlm_client.infer(
                 encoded_vision, 
                 feedback_fn=self.gui.get_user_input, 
-                display_fn=self.gui.display_message
+                display_fn=self.gui.display_message,
+                node=self
             )
 
             (obj_name, action) = vlm_inference
             obj_name = re.sub(" ", "_", obj_name)
             action = re.sub(" ", "_", action)
-            self.get_logger().info(f"Result -- object: {obj_name}, action: {action}")
+            self.get_logger().info(f">> VLM results -- object: {obj_name}, action: {action}")
 
             pnode_name = obj_name + "__object_pnode"
             grasped_object = perception_dict['grasped_object'][0]
@@ -154,13 +155,13 @@ class PolicyUserAlignment(Policy):
             await self.create_node_client(pnode_name, "llm_planner.pnode.SemanticPNode", pnode_params)
 
             goal_name = action + "__goal"
-            goal_params = {"neighbors": [{"name": "object_in_place_drive", "node_type": "Drive"}]}
+            goal_params = {"neighbors": [{"name": "clean_workspace_drive", "node_type": "Drive"}]}
             await self.create_node_client(goal_name, "dummy_nodes.dummy_goal.GoalDummy", goal_params)
 
             self.goals_to_plan.append((goal_name, obj_name))
 
         response.policy = self.name
-        self.get_logger().info(f"Policy {self.name} executed successfully.")
+        self.get_logger().info(f">> Success in executing policy {self.name}")
 
         return response
     
