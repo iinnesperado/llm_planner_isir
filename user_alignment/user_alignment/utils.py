@@ -67,8 +67,7 @@ You are a fixed robotic arm equipped with a gripper.
 You can place objects into three distinct boxes:
 
 - toolbox: for tools
-- tray: for personal objects 
-- bin: for trash
+- tray: for personal objects
 
 #SKILLS
 To complete your task you need to use the following information:
@@ -146,3 +145,38 @@ def png_to_ros_img(img_path):
     msg.header.frame_id = "camera"
 
     return msg
+
+obj_db = [
+    "mug",
+    "screwdriver",
+    "clamps",
+    "earmuffs",
+    "blue_elec",
+    "fan",
+    "glove",
+    "green_elec",
+    "body",
+    "finger"
+]
+
+def make_object_name_correction(obj_list, correction_cpt, node=None):
+    """
+    HACK
+    This is a way to correct the object name given by the VLM to match the ones in database for ReidPipeline.
+    Mainly it is to correct missing 's' (thinking about 'clamps'),
+    so the idea is that the name almost matches except for some letters. 
+    In which case, we also count the number of corrections done.
+
+    :param obj_name: list of objects recognised by VLM
+    :type obj_name: list[str]
+    :param correction_cpt: counter of number of corrections done to object name
+    :type correction_cpt: int
+    :param node: object node so that it's possible to print logs with ros
+    """
+    for name in obj_list:
+        for obj in obj_db:
+            if name in obj:
+                if name!=obj:
+                    correction_cpt += 1
+                    node.get_logger().info(f">> Correction made on object name '{name}' to '{obj}', total {correction_cpt=}")
+                return [obj], correction_cpt

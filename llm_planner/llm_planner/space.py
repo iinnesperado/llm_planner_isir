@@ -44,6 +44,7 @@ class SemanticSpace(PointBasedSpace):
         """
         Override to bypass numpy structured array machinery and match the semantic perception logc.
         """
+        added_point_pos = -1
         if (confidence > 0.0) or (self.get_probability(perception) > 0.0):
             self.semantic_members.append(deepcopy(perception))
             if self.size == 0:

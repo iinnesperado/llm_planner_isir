@@ -8,15 +8,18 @@ from llm_planner.utils import perception_msg_to_dict
 from llm_planner_interfaces.srv import GetTargetObject
 
 class SemanticPNode(PNode):
-    def __init__(self, name='pnode', class_name='cognitive_nodes.pnode.PNode', target_object=None, is_grasped=False, **params):
+    def __init__(self, name='pnode', class_name='cognitive_nodes.pnode.PNode', target_object=None, is_grasped=False, space_class=None, **params):
         """
         Surchage of PNode class to be able to add the information of the target_object and other to associated space.
 
         :param target_object: equiv to "target_object is on the table/ my hand"
         :param is_grasped: makes reference if the Pnode is gonna be "table" or "grasper" type, as in it has the object on its hand or not
         """
-        space = SemanticSpace(target_object=target_object, is_grasped=is_grasped, ident=name+ " space")
-        super().__init__(name, class_name, space=space, **params)
+        if target_object is not None and is_grasped is not None:
+            space = SemanticSpace(target_object=target_object, is_grasped=is_grasped, ident=name+ " space")
+            super().__init__(name, class_name, space=space, **params)
+        else:
+            super().__init__(name, class_name, space_class)
 
         self.target_object = target_object
 

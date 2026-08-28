@@ -186,32 +186,32 @@ class PolicyLLMPlanner(Policy):
         :param response: The response indicating the executed policy.
         :type response: cognitive_node_interfaces.srv.Execute.Response
         """
-        self.get_logger().info(f"== START LLM PLANNER POLICY ==")
+        self.get_logger().info(f">> Starting execution of policy {self.name}")
 
         perception_dict = perception_msg_to_dict(request.perception)
         self.get_logger().info(f"Received perception: {perception_dict}")
 
         alignment_response = await self.get_alignment_information()
         goal_name = alignment_response.goal_name
-        action = re.sub(r"__goal", "", goal_name)
+        task = re.sub(r"__goal", "", goal_name)
         self.get_logger().info(f"Alignment response {alignment_response}")
 
 
         # LLM PLAN REQUEST
-        # plan = self.resquest_llm_plan(goal_name)
-        # try:
-        #     plan_list = ast.literal_eval(plan)
-        # except (ValueError, SyntaxError) as e:
-        #     self.get_logger().error(f"Invalid plan returned by LLM: {plan}. Error: {e}")
-        # self.get_logger().debug(f"LLM generated plan: {plan}")
+        plan = self.resquest_llm_plan(task)
+        try:
+            plan_list = ast.literal_eval(plan)
+        except (ValueError, SyntaxError) as e:
+            self.get_logger().error(f"Invalid plan returned by LLM: {plan}. Error: {e}")
+        self.get_logger().debug(f"LLM generated plan: {plan}")
         # quick testing
-        plan_list = [{"name": "grasp_object", "params": {"target_object": "mug"}}, 
-                     {"name": "release_object", "params": {"target_location": "tray"}}]
+        # plan_list = [{"name": "grasp_object", "params": {"target_object": "mug"}}, 
+        #              {"name": "release_object", "params": {"target_location": "tray"}}]
 
 
         # EXECUTING THE PLAN
         for idx, policy in enumerate(plan_list): 
-            self.get_logger().info(f"--- Working on plan step {idx+1}: {policy}")
+            self.get_logger().info(f">> Working on plan step {idx+1}: {policy}")
             
             # PNODE CREATION
             target_object = alignment_response.target_object
@@ -219,7 +219,7 @@ class PolicyLLMPlanner(Policy):
                 self.grasped_object_sub['updated'] = False
                 
                 pnode_params = {}
-                self.get_logger().debug(f"Perception grasped_object before PNode creation: {self.grasped_object_sub['data']}")
+                self.get_logger().info(f"Perception grasped_object before PNode creation: {self.grasped_object_sub['data']}")
                 if (self.grasped_object_sub["data"]=="None" or self.grasped_object_sub["data"]==""):
                     is_grasped = False
                     pnode_name = f"{target_object}__object_pnode"
@@ -250,7 +250,7 @@ class PolicyLLMPlanner(Policy):
 
 
             # CNODE CREATION
-            cnode_name = f"{action}__step_{idx+1}_cnode"
+            cnode_name = f"{task}__step_{idx+1}_cnode"
             neighbor_dict = {"PICK_AND_PLACE": "WorldModel", pnode_name: "PNode", goal_name: "Goal"}
             cnode_params = {
                 'neighbors': [{'name': node, 'node_type': node_type} for node, node_type in neighbor_dict.items()]
@@ -261,12 +261,12 @@ class PolicyLLMPlanner(Policy):
             if sucess.success:
                 self.get_logger().info(f"Successfully added the Cnode {cnode_name} as neighbor to policy {policy_name}")
             else :
-                self.get_logger().error(f"ERROR Failed to link policy {policy_name} to CNode {cnode_name}")
+                self.get_logger().error(f"ERROR - Failed to link policy {policy_name} to CNode {cnode_name}")
             
 
         response.policy = self.name 
 
-        self.get_logger().info(f"Policy {self.name} executed successfully.")
+        self.get_logger().info(f">> Success in executing policy {self.name}")
 
         return response
 
@@ -294,8 +294,8 @@ class PolicyLLMPlanner(Policy):
         :return: plan with each policy names to follow, they should be existing policies available in the LTM.
         :rtype: list[str]        ['prim1', 'prim2', ...]
         """
-
-        self.get_logger().info(f"Making plan for {task} task/goal...")
+        task = re.sub("_", " ", task)
+        self.get_logger().info(f"Making plan for {task} task...")
 
         high_level_plan = self.high_level_plan(task)
         self.get_logger().info(f"High level plan : \n{high_level_plan}")
@@ -316,6 +316,12 @@ class PolicyLLMPlanner(Policy):
 
         response = self.llm_client.generate(prompt)
 
+        # match = re.search(r'\(\s*.*?\s*\)', response, re.DOTALL)
+        # try:
+        #     result = match.group(0)
+        # except AttributeError:
+        #     self.get_logger().error(f"Filtering did not work with LLM response: {response}")
+        
         return response
         
     def predict_outcomes(self, task, high_level_plan):
@@ -326,6 +332,12 @@ class PolicyLLMPlanner(Policy):
         prompt = re.sub(r"{plan}", high_level_plan, prompt)
 
         response = self.llm_client.generate(prompt)
+
+        # match = re.search(r'\{\s*.*?\s*\}', response, re.DOTALL)
+        # try:
+        #     result = match.group(0)
+        # except AttributeError:
+        #     self.get_logger().error(f"Filtering did not work with LLM response: {response}")
 
         return response
     
@@ -339,4 +351,10 @@ class PolicyLLMPlanner(Policy):
 
         response = self.llm_client.generate(prompt)
 
-        return response
+        match = re.search(r'\[\s*.*?\s*\]', response, re.DOTALL)
+        try:
+            result = match.group(0)
+        except AttributeError:
+            self.get_logger().error(f"Filtering did not work with LLM response: {response}")
+
+        return result
