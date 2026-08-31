@@ -32,9 +32,7 @@ class VLMRAG():
             Return only the list and ouput no other text.
             """
 
-        self.object_correction_cpt = 0
-
-    def infer(self, image_path, feedback_fn=None, display_fn=None, node=None, quick_test=False):
+    def infer(self, image_path, feedback_fn, display_fn, node, quick_test=False):
         """
         Generate a vision response for the image.
         """
@@ -45,8 +43,7 @@ class VLMRAG():
         
         ###
         # Get image description (object list) from the VLM
-        if display_fn:
-            display_fn("# Quering the VLM...")
+        display_fn("# Quering the VLM...")
         
         response = ollama.generate(
             model='llama3.2-vision',
@@ -73,9 +70,7 @@ class VLMRAG():
             obj_list = ast.literal_eval(obj_list_str)  #
             print(f"Extracted object list: {obj_list}")
             node.get_logger().info(f">> Extracted object list from VLM: {obj_list}")
-            obj_list, self.object_correction_cpt = make_object_name_correction(obj_list, self.object_correction_cpt, node)
             self.obj = obj_list[0]
-            # node.get_logger().info(f"{obj_list=}, {self.obj=}, {self.object_correction_cpt=}")
         else:
             print("List not found")
             
@@ -83,6 +78,17 @@ class VLMRAG():
         #Get the suggested action for the first object in the list (the action will be returned at the end, rendering the for loop useless. It can be changed to a print or other to get all the suggested actions.
 
         for obj in obj_list:
+
+            # object label correction 
+            display_fn(f"VLM labeled the object as : {obj}\n# Waiting correction on the label if needed...")
+            node.get_logger().info(">> Requesting user feedback on OBJECT")
+            obj_correction = feedback_fn()
+
+            node.get_logger().info(f">> Received user feedback {obj_correction=}")
+            if obj_correction!='ok':
+                obj = obj_correction
+                self.obj = obj_correction
+
 
             context = []
             print('Collection: ', self.collection) #Display available corrections
@@ -100,8 +106,8 @@ class VLMRAG():
             
             response = re.sub(r'<think>.*?</think>\s*', '', response.get('response', ''), flags=re.DOTALL)
             print(f"Response from the model: {response}") #Display initial object suggection
-            if display_fn:
-                display_fn(f"VLM: {response}")
+
+            display_fn(f"VLM: {response}")
             node.get_logger().info(">> Finished quering VLM")
             
 
@@ -111,17 +117,23 @@ class VLMRAG():
 
             id_coll = 0
             # info = input("Add an information for the model to correct the plan (if the proposition is good type 'ok'): ") #Accept user feedback
-            if display_fn:
-                display_fn("# Waiting an information for the model to correct the plan...")
-                node.get_logger().info(">> Requesting user feedback")
 
-            if feedback_fn:
-                info = feedback_fn()
-            node.get_logger().info(f">> Received user feedback {info=}")
+            display_fn("# Waiting correction on placement location of the object...")
+            node.get_logger().info(">> Requesting user feedback on LOCATION")
 
-            if info != 'ok': #If the info is a correction, add it to the database #TODO: embed object id instead to robustify comparison?
+
+            loc_correction = feedback_fn()
+            node.get_logger().info(f">> Received user feedback {loc_correction=}")
+
+            if loc_correction != 'ok': #If the info is a correction, add it to the database #TODO: embed object id instead to robustify comparison?
                 node.get_logger().info(f">> Quering VLM with correction...")
 
+                if "tray" in loc_correction:
+                    location = "tray"
+                else :
+                    location = "toolbox"
+
+                info = obj + " should be in the " + location
                 corrections.append(info)
                 context.append({'role':'user','content':info})
 
@@ -142,13 +154,13 @@ class VLMRAG():
 
                 response = re.sub(r'<think>.*?</think>\s*', '', response.message.content, flags=re.DOTALL)
                 print(f"Response from the model after adding: {response}")
-                if display_fn:
-                    display_fn(f"VLM correction: {response}")
+
+                display_fn(f"VLM correction: {response}")
                 node.get_logger().info(">> Finished quering VLM with correction")
 
 
-            if display_fn:
-                display_fn("\n")
+
+            display_fn("\n")
             
             return(self.obj, response) #Return object and action
 

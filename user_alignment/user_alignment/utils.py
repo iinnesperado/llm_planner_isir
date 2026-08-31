@@ -173,10 +173,14 @@ def make_object_name_correction(obj_list, correction_cpt, node=None):
     :type correction_cpt: int
     :param node: object node so that it's possible to print logs with ros
     """
+    res = None
     for name in obj_list:
         for obj in obj_db:
             if name in obj:
                 if name!=obj:
                     correction_cpt += 1
+                    res = [obj]
                     node.get_logger().info(f">> Correction made on object name '{name}' to '{obj}', total {correction_cpt=}")
-                return [obj], correction_cpt
+    if res is None:
+        res = obj_list
+    return res, correction_cpt
