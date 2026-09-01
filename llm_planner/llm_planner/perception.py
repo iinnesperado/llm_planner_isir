@@ -126,4 +126,4 @@ class SemanticPerception(Perception):
         object_name = [label for label,_ in prediction_list]
         confidence = [score for _, score in prediction_list]
         max_idx = numpy.argmax(confidence)
-        return object_name[max_idx]
+        return object_name[max_idx] if confidence[max_idx] > 0.3 else "unkown"
