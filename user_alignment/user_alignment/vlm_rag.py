@@ -130,8 +130,9 @@ class VLMRAG():
 
                 if "tray" in loc_correction:
                     location = "tray"
-                else :
+                elif "toolbox" in loc_correction :
                     location = "toolbox"
+                    
 
                 info = obj + " should be in the " + location
                 corrections.append(info)

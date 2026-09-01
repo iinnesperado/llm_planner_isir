@@ -51,7 +51,7 @@ class PickAndPlaceSim(Node):
 
         self.objects = {}               # dict {obj_id: {location: location_id}}
         self.grasped_object = None      # check if the robot has already an object
-        self.img_idx = 0
+        self.img_idx = 3
         
         # Callback groups for concurrency
         self.cbgroup_server=MutuallyExclusiveCallbackGroup()
@@ -122,13 +122,13 @@ class PickAndPlaceSim(Node):
         Sets up the static image to be published during the simulation.
         Only used for testing wihout a camera in simulator.
         """
-        img_max = {"training": 4, "validation": 5}
+        img_max = {"training": 6, "validation": 7}
         if self.img_idx < img_max[self.exp_phase]:
             img_msg = png_to_ros_img(f"/home/user/ines_ros2_humble/eMDB_ws/build/workstation_simulator/workstation_simulator/config/rgb_00{self.img_idx}.png")
         # elif self.img_idx<14 :
         #     img_msg = png_to_ros_img(f"/home/user/ines_ros2_humble/eMDB_ws/build/workstation_simulator/workstation_simulator/config/rgb_0{self.img_idx}.png")
         else :
-            self.img_idx = 0
+            self.img_idx = 3
             self.exp_phase = "validation"
             img_msg = png_to_ros_img(f"/home/user/ines_ros2_humble/eMDB_ws/build/workstation_simulator/workstation_simulator/config/rgb_00{self.img_idx}.png")
 
